@@ -13,6 +13,131 @@ import {
 import { CATEGORIES } from "../config.js";
 
 const catLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || "Autre";
+const pendingStorageKey = (uid) => `boutique-pending-sales:${uid}`;
+let pendingUid = null;
+let pendingSales = [];
+
+function ensurePendingSales() {
+  const uid = state.me?.uid;
+  if (!uid) { pendingUid = null; pendingSales = []; return; }
+  if (pendingUid === uid) return;
+  pendingUid = uid;
+  try {
+    const stored = JSON.parse(localStorage.getItem(pendingStorageKey(uid)) || "[]");
+    pendingSales = Array.isArray(stored) ? stored : [];
+  } catch { pendingSales = []; }
+}
+
+function savePendingSales() {
+  if (!pendingUid) throw new Error("Connectez-vous pour accéder aux ventes en attente.");
+  localStorage.setItem(pendingStorageKey(pendingUid), JSON.stringify(pendingSales));
+}
+
+export function pendingSalesCount() {
+  ensurePendingSales();
+  return pendingSales.length;
+}
+
+function pendingQty(productId) {
+  ensurePendingSales();
+  return pendingSales.reduce((total, item) => total + (item.sale.productId === productId ? num(item.sale.qty) : 0), 0);
+}
+
+function availableQty(product) {
+  return Math.max(0, num(product.qty) - pendingQty(product.id));
+}
+
+function serializePendingSale(sale) {
+  const { dueDate, payments, ...fields } = sale;
+  return {
+    ...fields,
+    dueDateMs: dueDate?.toMillis?.() ?? null,
+    payments: payments.map(({ date, ...payment }) => ({ ...payment, dateMs: date.toMillis() })),
+  };
+}
+
+function restorePendingSale(sale) {
+  const { dueDateMs, payments, ...fields } = sale;
+  return {
+    ...fields,
+    dueDate: dueDateMs == null ? null : Timestamp.fromMillis(dueDateMs),
+    payments: payments.map(({ dateMs, ...payment }) => ({ ...payment, date: Timestamp.fromMillis(dateMs) })),
+  };
+}
+
+async function queueSale(sale, saleId, movementId, capturedAt = Date.now()) {
+  ensurePendingSales();
+  pendingSales.push({ id: saleId, movementId, capturedAt, sale: serializePendingSale(sale), error: "" });
+  try { savePendingSales(); }
+  catch (error) { pendingSales.pop(); throw error; }
+  rerender();
+}
+
+async function writeSale(saleId, movementId, sale, capturedAt = null) {
+  const saleRef = doc(db, "sales", saleId);
+  const movRef = doc(db, "movements", movementId);
+  const prodRef = doc(db, "products", sale.productId);
+  await runTransaction(db, async (tx) => {
+    const existing = await tx.get(saleRef);
+    if (existing.exists()) return;
+    const snap = await tx.get(prodRef);
+    const current = snap.exists() ? snap.data() : null;
+    if (!current || num(current.qty) < sale.qty) throw new Error(`Stock insuffisant (${current ? current.qty : 0} disponible).`);
+    tx.update(prodRef, { qty: num(current.qty) - sale.qty, updatedAt: serverTimestamp() });
+    tx.set(saleRef, capturedAt == null ? { ...sale, date: serverTimestamp() } : {
+      ...sale,
+      date: Timestamp.fromMillis(capturedAt),
+      offlineCapturedAt: Timestamp.fromMillis(capturedAt),
+    });
+    tx.set(movRef, {
+      type: "out", reason: "sale", productId: sale.productId, productName: sale.productName, brand: sale.brand || "",
+      qty: sale.qty, refId: saleId, date: serverTimestamp(), by: sale.createdBy, byName: sale.createdByName,
+    });
+  });
+}
+
+export async function syncPendingSales() {
+  ensurePendingSales();
+  if (!pendingSales.length) return;
+  if (!navigator.onLine) return toast("Connexion Internet requise pour synchroniser les ventes.", "error");
+  let synced = 0;
+  for (const item of [...pendingSales]) {
+    try {
+      await writeSale(item.id, item.movementId, restorePendingSale(item.sale), item.capturedAt);
+      pendingSales = pendingSales.filter((sale) => sale.id !== item.id);
+      savePendingSales();
+      synced++;
+    } catch (error) {
+      const current = pendingSales.find((sale) => sale.id === item.id);
+      if (current) current.error = friendlyError(error);
+      savePendingSales();
+    }
+  }
+  rerender();
+  if (synced) toast(`${synced} vente(s) synchronisée(s).`, "success");
+  if (pendingSales.length) toast(`${pendingSales.length} vente(s) restent en attente. Vérifiez le stock ou votre connexion.`, "error", 6000);
+}
+
+actions["sync-sales"] = syncPendingSales;
+
+actions["discard-pending-sale"] = async (el) => {
+  const item = pendingSales.find((sale) => sale.id === el.dataset.id);
+  if (!item || !(await confirmBox("Cette vente n'a pas encore été envoyée à Firebase. La retirer définitivement de cet appareil ?", { okLabel: "Retirer", danger: true }))) return;
+  pendingSales = pendingSales.filter((sale) => sale.id !== item.id);
+  savePendingSales();
+  rerender();
+};
+
+function pendingSalesBlock() {
+  if (!pendingSales.length) return "";
+  return `<section class="card"><div class="card-head"><h3>Ventes en attente de synchronisation (${pendingSales.length})</h3>
+      <button class="btn primary" data-action="sync-sales" ${navigator.onLine ? "" : "disabled"}>Synchroniser</button></div>
+    <p class="muted">Ces ventes sont enregistrées sur cet appareil, mais ne figurent pas encore dans les données partagées. La synchronisation recontrôlera le stock.</p>
+    <div class="table-wrap"><table class="table responsive compact"><thead><tr><th>Date locale</th><th>Produit</th><th>Qté</th><th>Total</th><th>État</th><th></th></tr></thead><tbody>
+      ${pendingSales.map((item) => `<tr><td data-label="Date locale">${fmtDate(new Date(item.capturedAt))}</td><td data-label="Produit">${esc(item.sale.brand || "")} ${esc(item.sale.productName)}</td>
+        <td data-label="Qté">${item.sale.qty}</td><td data-label="Total">${fm(item.sale.total)}</td><td data-label="État">${item.error ? `<span class="neg">${esc(item.error)}</span>` : chip("À synchroniser", "amber")}</td>
+        <td class="actions"><button class="btn sm ghost" data-action="discard-pending-sale" data-id="${esc(item.id)}">Retirer</button></td></tr>`).join("")}</tbody></table></div></section>`;
+}
 
 export const statusChip = (s) => {
   if (s.status === "cancelled") return chip("Annulée", "gray");
@@ -38,6 +163,7 @@ function filtered() {
 }
 
 function render() {
+  ensurePendingSales();
   const admin = isAdmin();
   const list = filtered();
   const live = list.filter((s) => s.status !== "cancelled");
@@ -61,6 +187,8 @@ function render() {
       </select>
       ${periodSelect("sales.period", "month")}
     </div>
+
+    ${pendingSalesBlock()}
 
     <div class="summary-bar">
       <div><span class="muted">Total ventes</span><strong>${fm(total)}</strong></div>
@@ -102,13 +230,14 @@ actions["more-sales"] = () => { setF("sales.limit", getF("sales.limit", 100) + 1
 actions["new-sale"] = (el) => openSaleForm(el?.dataset?.product || "");
 
 export function openSaleForm(preselect = "") {
-  const avail = state.products.filter((p) => !p.archived && num(p.qty) > 0)
+  ensurePendingSales();
+  const avail = state.products.filter((p) => !p.archived && availableQty(p) > 0)
     .sort((a, b) => `${a.brand}${a.name}`.localeCompare(`${b.brand}${b.name}`));
   if (!avail.length) { toast("Aucun produit en stock à vendre.", "error"); return; }
   const buyers = [...new Set(state.sales.map((s) => s.buyerName).filter(Boolean))];
   const groups = CATEGORIES.map((c) => ({ c, items: avail.filter((p) => (p.category || "autre") === c.id) })).filter((g) => g.items.length);
   const options = groups.map((g) => `<optgroup label="${esc(g.c.label)}">${g.items.map((p) =>
-    `<option value="${p.id}" ${p.id === preselect ? "selected" : ""}>${esc(p.brand || "")} ${esc(p.name)} — ${p.qty} en stock</option>`).join("")}</optgroup>`).join("");
+    `<option value="${p.id}" ${p.id === preselect ? "selected" : ""}>${esc(p.brand || "")} ${esc(p.name)} — ${availableQty(p)} disponible(s)</option>`).join("")}</optgroup>`).join("");
 
   openModal("Nouvelle vente", `
     <form data-submit="saveSale" class="form" autocomplete="off">
@@ -149,7 +278,7 @@ export function openSaleForm(preselect = "") {
 
 function updateSaleForm(form, productChanged = false) {
   const p = productById(form.productId.value);
-  if (productChanged && p) { form.unitPrice.value = p.sellPrice ?? ""; form.qty.max = p.qty; }
+  if (productChanged && p) { form.unitPrice.value = p.sellPrice ?? ""; form.qty.max = availableQty(p); }
   if (!p) form.qty.removeAttribute("max");
   const qty = Math.max(0, parseInt(form.qty.value, 10) || 0);
   const price = num(form.unitPrice.value);
@@ -166,8 +295,9 @@ function updateSaleForm(form, productChanged = false) {
 
   const hint = [];
   if (p) {
-    hint.push(`Stock disponible : <strong>${p.qty}</strong>`);
-    if (qty > p.qty) hint.push(`<span class="neg">Quantité supérieure au stock</span>`);
+    const available = availableQty(p);
+    hint.push(`Stock disponible : <strong>${available}</strong>`);
+    if (qty > available) hint.push(`<span class="neg">Quantité supérieure au stock disponible sur cet appareil</span>`);
     const c = unitCost(p.id);
     if (isAdmin() && c != null && price < c) hint.push(`<span class="neg">⚠ Prix inférieur au coût de revient (${fm(c)})</span>`);
   }
@@ -179,13 +309,14 @@ function updateSaleForm(form, productChanged = false) {
 inputs.saleCalc = (el) => updateSaleForm(el.closest("form"), el.name === "productId");
 
 submits.saveSale = async (form) => {
+  ensurePendingSales();
   const d = formData(form);
   const product = productById(d.productId);
   const qty = parseInt(d.qty, 10);
   const unitPrice = round2(num(d.unitPrice));
   if (!product) return toast("Choisissez un produit.", "error");
   if (!(qty > 0)) return toast("Quantité invalide.", "error");
-  if (qty > num(product.qty)) return toast(`Stock insuffisant (${product.qty} disponible).`, "error");
+  if (qty > availableQty(product)) return toast(`Stock insuffisant (${availableQty(product)} disponible sur cet appareil).`, "error");
   const total = round2(qty * unitPrice);
   let paid = d.payMode === "full" ? total : d.payMode === "none" ? 0 : round2(Math.min(num(d.paidAmount), total));
   if (d.payMode === "partial" && !(paid > 0)) return toast("Indiquez le montant payé ou choisissez « Rien payé ».", "error");
@@ -195,28 +326,23 @@ submits.saveSale = async (form) => {
   const me = state.me;
   const saleRef = doc(collection(db, "sales"));
   const movRef = doc(collection(db, "movements"));
-  const prodRef = doc(db, "products", product.id);
   const sale = {
     productId: product.id, productName: product.name, brand: product.brand || "", category: product.category || "autre",
     orderId: product.orderId || null, qty, unitPrice, total, buyerName: d.buyerName || "", buyerPhone: d.buyerPhone || "",
     paid, remaining: rest, status: paymentStatus(total, paid),
     dueDate: rest > 0 ? Timestamp.fromDate(fromInputDate(d.dueDate)) : null,
     payments: paid > 0 ? [{ amount: paid, date: Timestamp.now(), by: me.uid, byName: me.name }] : [],
-    createdBy: me.uid, createdByName: me.name, date: serverTimestamp(),
+    createdBy: me.uid, createdByName: me.name,
   };
   const btn = form.querySelector("[type=submit]");
   try {
-    await busy(btn, () => runTransaction(db, async (tx) => {
-      const snap = await tx.get(prodRef);
-      const cur = snap.exists() ? snap.data() : null;
-      if (!cur || num(cur.qty) < qty) throw new Error(`Stock insuffisant (${cur ? cur.qty : 0} disponible).`);
-      tx.update(prodRef, { qty: num(cur.qty) - qty, updatedAt: serverTimestamp() });
-      tx.set(saleRef, sale);
-      tx.set(movRef, {
-        type: "out", reason: "sale", productId: product.id, productName: product.name, brand: product.brand || "",
-        qty, refId: saleRef.id, date: serverTimestamp(), by: me.uid, byName: me.name,
-      });
-    }));
+    if (!navigator.onLine) {
+      await queueSale(sale, saleRef.id, movRef.id);
+      closeModal();
+      toast("Vente enregistrée sur cet appareil. Synchronisez-la au retour de la connexion.", "info", 6000);
+      return;
+    }
+    await busy(btn, () => writeSale(saleRef.id, movRef.id, sale));
     const done = { id: saleRef.id, ...sale, date: new Date() };
     openModal("Vente enregistrée ✓", `
       <div class="success-box">${icon("check", 36)}
@@ -228,7 +354,17 @@ submits.saveSale = async (form) => {
         <button class="btn primary" data-action="new-sale">${icon("plus")} Nouvelle vente</button>
         <button class="btn ghost" data-action="close-modal">Fermer</button></div>`);
     document.getElementById("btn-receipt").onclick = () => printReceipt(done);
-  } catch (e) { toast(friendlyError(e), "error", 5000); }
+  } catch (e) {
+    if (!navigator.onLine || ["unavailable", "deadline-exceeded", "network-request-failed"].includes(e?.code)) {
+      try {
+        await queueSale(sale, saleRef.id, movRef.id);
+        closeModal();
+        toast("Connexion interrompue : vente gardée sur cet appareil, à synchroniser plus tard.", "info", 6000);
+        return;
+      } catch (queueError) { toast(friendlyError(queueError), "error", 5000); return; }
+    }
+    toast(friendlyError(e), "error", 5000);
+  }
 };
 
 // ============================================================

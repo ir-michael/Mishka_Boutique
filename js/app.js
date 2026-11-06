@@ -12,7 +12,7 @@ import {
 import { CATEGORIES } from "./config.js";
 
 import dashboard from "./pages/dashboard.js";
-import sales from "./pages/sales.js";
+import sales, { pendingSalesCount } from "./pages/sales.js";
 import stock from "./pages/stock.js";
 import orders, { arrivalsPage } from "./pages/orders.js";
 import debts from "./pages/debts.js";
@@ -204,6 +204,7 @@ function showShell() {
           <button class="icon-btn menu-btn" data-action="toggle-menu" aria-label="Menu">${icon("menu", 22)}</button>
           <h1 id="page-title"></h1>
           <span class="pill offline" id="offline-pill" hidden>${icon("alert", 14)} Hors ligne</span>
+          <button class="btn sm primary" id="sync-sales" data-action="sync-sales" type="button" hidden></button>
           <button class="icon-btn" id="notif-btn" data-action="enable-notif" title="Activer les notifications" hidden aria-label="Activer les notifications">${icon("chat", 20)}</button>
         </header>
         <main id="view" class="view"></main>
@@ -234,6 +235,16 @@ function paintChrome() {
     b.hidden = !n; b.textContent = n > 9 ? "9+" : n;
   });
   document.title = `${unread ? `(${unread}) ` : ""}${state.shop.name || "Boutique"}`;
+  updateSyncButton();
+}
+
+function updateSyncButton() {
+  const button = document.getElementById("sync-sales");
+  if (!button) return;
+  const count = pendingSalesCount();
+  button.hidden = count === 0;
+  button.disabled = !navigator.onLine;
+  button.textContent = navigator.onLine ? `Synchroniser (${count})` : `${count} en attente`;
 }
 
 // ---------- Rendu de la page ----------
@@ -334,9 +345,16 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { pi
 function updateOnline() {
   const pill = document.getElementById("offline-pill");
   if (pill) pill.hidden = navigator.onLine;
+  updateSyncButton();
 }
-window.addEventListener("online", () => { updateOnline(); toast("Connexion rétablie — synchronisation en cours ✓", "success"); });
-window.addEventListener("offline", () => { updateOnline(); toast("Vous êtes hors ligne. Les saisies seront envoyées au retour du réseau.", "info", 5000); });
+window.addEventListener("online", () => {
+  updateOnline();
+  toast(pendingSalesCount() ? "Connexion rétablie. Cliquez sur « Synchroniser » pour envoyer les ventes en attente." : "Connexion rétablie.", "success", 5000);
+});
+window.addEventListener("offline", () => {
+  updateOnline();
+  toast("Hors ligne : les ventes seront gardées sur cet appareil. Les autres écritures compatibles seront synchronisées au retour du réseau.", "info", 6000);
+});
 
 function syncNotifButton() {
   const b = document.getElementById("notif-btn");

@@ -33,12 +33,21 @@ Compter environ 20 minutes, une seule fois.
 
 Le projet est déjà configuré pour Firebase Hosting. Depuis la racine du dossier, après connexion au bon projet Firebase, lancez `firebase.cmd deploy --only hosting`. Le site sera publié sur `https://<project-id>.web.app`. Ajoutez ensuite ce domaine dans **Authentication → Settings → Domaines autorisés**. L'offre sans frais inclut actuellement jusqu'à 10 Go de stockage et 10 Go de transfert par mois ; surveillez l'usage dans la console Firebase.
 
+Après une modification des règles permettant les ventes hors ligne, publiez aussi les règles avec `firebase.cmd deploy --only firestore:rules`. Ces deux commandes mettent à jour le site et ses autorisations, sans effacer les documents déjà enregistrés dans Firestore.
+
 ## Étape 3 — Première utilisation
 
 1. Ouvrez votre adresse Netlify : l'écran **« Première utilisation »** apparaît.
 2. Créez **votre** compte (administrateur). Ce premier compte devient automatiquement le propriétaire ; l'écran ne s'affichera plus ensuite.
 3. **Paramètres → Compte de l'employé** : créez le compte de votre employé (e-mail + mot de passe que vous lui communiquez).
-4. Sur téléphone : ouvrez le site dans Chrome / Safari → **Ajouter à l'écran d'accueil**. L'app s'installe comme une vraie application.
+4. **Installation mobile** :
+   - Android : ouvrez le site dans Chrome, menu ⋮ → **Installer l'application** ou **Ajouter à l'écran d'accueil**.
+   - iPhone/iPad : ouvrez le site dans Safari, bouton **Partager** → **Sur l'écran d'accueil**. iOS n'affiche pas toujours de fenêtre d'installation automatique.
+   Le site doit être ouvert en HTTPS. Connectez-vous une première fois avec Internet sur chaque appareil.
+
+5. **Hors ligne** : les écrans et données déjà chargés sont gardés sur l'appareil. Une vente saisie sans réseau apparaît dans la file « Ventes en attente de synchronisation » ; appuyez sur **Synchroniser** au retour d'Internet. Le stock est alors revérifié. Si le stock a changé entre-temps, la vente reste en attente avec une erreur, sans perdre sa saisie. La file est locale à cet appareil et au compte connecté ; ne videz pas les données du navigateur avant de l'avoir synchronisée. Les transactions de vente et les modifications de stock ne sont pas appliquées au stock partagé tant qu'elles n'ont pas été synchronisées.
+
+6. **Changer l'icône** : remplacez les images `icons/icon-192.png`, `icons/icon-512.png` et `icons/icon-maskable-512.png` par votre logo carré aux dimensions indiquées par leurs noms. Remplacez aussi `icons/icon.svg` pour l'icône d'onglet. Gardez ces noms de fichiers, redéployez, puis retirez et réinstallez l'application sur le téléphone pour actualiser son icône. Envoyez un logo si vous souhaitez que je prépare les déclinaisons adaptées.
 
 ## Étape 4 (facultative) — Vidéos dans la messagerie
 

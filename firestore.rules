@@ -18,6 +18,13 @@ service cloud.firestore {
     function onlyChanges(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
+    function validSaleDate() {
+      return request.resource.data.date == request.time
+        || (request.resource.data.offlineCapturedAt is timestamp
+            && request.resource.data.date == request.resource.data.offlineCapturedAt
+            && request.resource.data.date <= request.time
+            && request.resource.data.date >= request.time - duration.value(30, 'd'));
+    }
 
     // ---------- Premier lancement ----------
     // Lisible sans connexion (pour savoir s'il faut afficher l'écran "Première utilisation")
@@ -70,7 +77,7 @@ service cloud.firestore {
       allow read: if isActive();
       allow create: if isActive()
         && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.date == request.time          // date automatique
+        && validSaleDate()
         && request.resource.data.qty > 0
         && request.resource.data.unitPrice >= 0
         && math.abs(request.resource.data.total - request.resource.data.qty * request.resource.data.unitPrice) < 0.01

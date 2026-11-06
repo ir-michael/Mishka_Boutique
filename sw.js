@@ -1,7 +1,7 @@
 // Service worker : l'application démarre instantanément et reste utilisable sans réseau.
 // Stratégie : réseau d'abord pour nos fichiers (toujours la dernière version), cache en secours.
 // Firebase (données) gère lui-même le mode hors ligne via son cache local.
-const CACHE = "boutique-v1";
+const CACHE = "boutique-v2";
 const SHELL = ["./", "index.html", "css/style.css", "manifest.webmanifest", "icons/icon.svg"];
 
 self.addEventListener("install", (e) => {
