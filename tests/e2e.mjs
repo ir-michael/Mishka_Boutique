@@ -1,0 +1,358 @@
+// Scénario complet dans un vrai navigateur (faux Firebase). Lancer : node tests/e2e.mjs <dossier-captures>
+import { launch, newPage, BASE } from "./harness.mjs";
+import fs from "fs";
+
+const SHOTS = process.argv[2] || "/tmp";
+let pass = 0, fail = 0;
+const ok = (cond, msg, extra = "") => { if (cond) { pass++; console.log("  ✓", msg); } else { fail++; console.log("  ✗ ÉCHEC :", msg, extra); } };
+const section = (t) => console.log("\n▶", t);
+const norm = (s) => s.replace(/[  ]/g, " ");
+const dump = (page) => page.evaluate(() => window.__FB.__dump());
+const money = (n) => new RegExp(String(n).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, "[ \\u202f\\u00a0]?"));
+
+const { browser, ctx } = await launch({ viewport: { width: 1280, height: 850 } });
+const admin = await newPage(ctx, "admin");
+const emp = await newPage(ctx, "employé");
+const toastText = async (p) => norm(await p.locator("#toasts").innerText().catch(() => ""));
+const submitModal = (p) => p.locator("#modal-root button[type=submit]").click();
+const go = async (p, page) => { await p.locator(`.sidebar a[data-nav=${page}]`).click(); await p.waitForTimeout(150); };
+
+try {
+  // ------------------------------------------------------------------ 1. Première utilisation
+  section("Première utilisation : création de la boutique et de l'administrateur");
+  await admin.goto(BASE);
+  await admin.waitForSelector("[data-submit=setup]");
+  await admin.fill("[name=shop]", "Tech Store");
+  await admin.fill("[name=name]", "Patrick Mukendi");
+  await admin.fill("[name=email]", "admin@test.com");
+  await admin.fill("[name=password]", "secret123");
+  await admin.click(".auth-card button[type=submit]");
+  await admin.waitForSelector(".sidebar", { timeout: 8000 });
+  ok(await admin.locator("#shop-name").innerText() === "Tech Store", "la boutique est créée et le menu affiche son nom");
+  const d0 = await dump(admin);
+  ok(d0.users && Object.values(d0.users)[0].role === "admin", "le premier compte est administrateur");
+  ok(d0.meta?.setup?.done === true, "le marqueur « boutique initialisée » est posé");
+  const navAdmin = await admin.locator(".sidebar .nav a").allInnerTexts();
+  console.log("  menu admin :", navAdmin.map((s) => s.trim()).join(" · "));
+  ok(["Commandes", "Rapports", "Entrées & sorties", "Dépenses", "Créances", "Messagerie", "Paramètres"].every((l) => navAdmin.some((n) => n.includes(l))), "le menu administrateur contient toutes les rubriques");
+
+  // ------------------------------------------------------------------ 2. Compte employé
+  section("Compte de l'employé créé depuis les Paramètres");
+  await go(admin, "settings");
+  await admin.fill("[data-submit=createEmployee] [name=name]", "Jean Kalala");
+  await admin.fill("[data-submit=createEmployee] [name=email]", "jean@test.com");
+  await admin.fill("[data-submit=createEmployee] [name=password]", "jean123");
+  await admin.click("[data-submit=createEmployee] button[type=submit]");
+  await admin.waitForSelector("text=Actif");
+  const d1 = await dump(admin);
+  const emps = Object.values(d1.users).filter((u) => u.role === "employee");
+  ok(emps.length === 1 && emps[0].active === true, "l'employé existe (rôle employee, actif)");
+  ok(await admin.locator(".sidebar").count() === 1 && (await admin.locator("#shop-name").innerText()) === "Tech Store", "l'administrateur reste connecté après la création du compte");
+
+  // ------------------------------------------------------------------ 3. Commande
+  section("Commande : 2 ordinateurs à 300 + 5 chargeurs à 40 + frais (transfert 20, motivation 30)");
+  await go(admin, "orders");
+  await admin.click("[data-action=new-order]");
+  const L0 = admin.locator("#modal-root [data-line]").nth(0);
+  await L0.locator("[name=l_cat]").selectOption("ordinateur");
+  await L0.locator("[name=l_brand]").fill("HP");
+  await L0.locator("[name=l_name]").fill("EliteBook 840 G5");
+  await L0.locator("[name=l_qty]").fill("2");
+  await L0.locator("[name=l_price]").fill("300");
+  await admin.click("[data-action=add-line]");
+  const L1 = admin.locator("#modal-root [data-line]").nth(1);
+  await L1.locator("[name=l_cat]").selectOption("accessoire");
+  await L1.locator("[name=l_brand]").fill("Anker");
+  await L1.locator("[name=l_name]").fill("Chargeur 65W");
+  await L1.locator("[name=l_qty]").fill("5");
+  await L1.locator("[name=l_price]").fill("40");
+  await admin.click("[data-action=add-exp]");
+  await admin.locator("#modal-root [data-exp]").nth(0).locator("[name=e_type]").selectOption("transfert");
+  await admin.locator("#modal-root [data-exp]").nth(0).locator("[name=e_amount]").fill("20");
+  await admin.click("[data-action=add-exp]");
+  await admin.locator("#modal-root [data-exp]").nth(1).locator("[name=e_type]").selectOption("motivation");
+  await admin.locator("#modal-root [data-exp]").nth(1).locator("[name=e_amount]").fill("30");
+  const live = norm(await admin.locator("#order-totals").innerText());
+  ok(money("800").test(live) && money("50").test(live) && money("850").test(live), "le total de la commande se calcule en direct (800 + 50 = 850)", live.replace(/\n/g, " | "));
+  ok(norm(await L0.locator("[data-lt]").innerText()).includes("600"), "total de ligne = quantité × prix unitaire (600)");
+  await admin.screenshot({ path: SHOTS + "/10-order-form.png" });
+  await submitModal(admin);
+  await admin.waitForSelector("tr[data-action=order-detail]");
+  const d2 = await dump(admin);
+  const order = Object.values(d2.orders)[0];
+  ok(order.status === "pending" && order.totals.totalCost === 850, "commande enregistrée « en cours », coût 850", JSON.stringify(order.totals));
+  ok(Object.keys(d2.orderNotices || {}).length === 1, "un avis d'arrivage est créé pour l'employé");
+
+  section("Réception du colis : frais de kilo 7 kg × 10 = 70 → coûts de revient et entrée en stock");
+  await admin.click("tr[data-action=order-detail]");
+  await admin.click("[data-action=receive-order]");
+  await admin.fill("[name=weightKg]", "7");
+  await admin.fill("[name=pricePerKg]", "10");
+  ok(await admin.inputValue("[name=freightTotal]") === "70", "frais de kilo calculés automatiquement (7 × 10 = 70)");
+  const recv = norm(await admin.locator("#recv-totals").innerText());
+  ok(money("920").test(recv), "coût total final de la commande = 920", recv.replace(/\n/g, " | "));
+  const rows = await admin.locator(".receive-table tbody tr").allInnerTexts();
+  ok(norm(rows[0]).includes("345") && norm(rows[1]).includes("46"), "coût de revient : 345 (ordinateur) et 46 (chargeur)", rows.map(norm).join(" || "));
+  ok(await admin.inputValue("[name=sell_0]") === "414" && await admin.inputValue("[name=sell_1]") === "55.2", "prix de vente suggérés avec 20 % de marge (414 et 55,2)");
+  await admin.screenshot({ path: SHOTS + "/11-receive.png" });
+  await submitModal(admin);
+  await admin.waitForTimeout(400);
+  const d3 = await dump(admin);
+  const prods = Object.entries(d3.products).map(([id, p]) => ({ id, ...p, cost: d3.costs[id].unitCost }));
+  const hp = prods.find((p) => p.brand === "HP"), anker = prods.find((p) => p.brand === "Anker");
+  ok(hp.qty === 2 && hp.cost === 345 && hp.sellPrice === 414, "HP : 2 en stock, coût 345, prix 414");
+  ok(anker.qty === 5 && anker.cost === 46 && anker.sellPrice === 55.2, "Anker : 5 en stock, coût 46, prix 55,2");
+  ok(Object.values(d3.orders)[0].status === "received" && Object.values(d3.orders)[0].totals.totalCost === 920, "commande « reçue », coût total 920");
+  ok(Object.values(d3.movements).filter((m) => m.type === "in" && m.reason === "order").length === 2, "2 mouvements d'entrée enregistrés");
+  ok(Object.keys(d3.orderNotices).length === 1 && Object.values(d3.orderNotices)[0].status === "received", "l'avis d'arrivage passe à « reçu »");
+
+  // ------------------------------------------------------------------ 4. Vente avec paiement partiel
+  section("Vente (admin) : 1 EliteBook à 414, acheteur Marie, 200 payés, reste 214 à solder");
+  await go(admin, "sales");
+  await admin.click("[data-action=new-sale]");
+  await admin.selectOption("[name=productId]", hp.id);
+  ok(await admin.inputValue("[name=unitPrice]") === "414", "le prix unitaire se remplit depuis la fiche produit");
+  ok(norm(await admin.inputValue("[name=total]")).includes("414"), "le total de la vente se calcule (1 × 414)");
+  await admin.fill("[name=buyerName]", "Marie");
+  await admin.fill("[name=buyerPhone]", "0990001122");
+  await admin.check("[name=payMode][value=partial]");
+  await admin.fill("[name=paidAmount]", "200");
+  const rest = norm(await admin.locator("#sale-rest").innerText());
+  ok(money("214").test(rest), "le reste à payer s'affiche en direct (214)", rest);
+  ok(await admin.locator("[name=dueDate]").evaluate((e) => e.required && !e.closest("[hidden]")), "la date d'échéance est obligatoire quand il reste un solde");
+  await submitModal(admin);
+  await admin.waitForSelector("#btn-receipt");
+  const d4 = await dump(admin);
+  const sale1 = Object.values(d4.sales)[0];
+  ok(sale1.total === 414 && sale1.paid === 200 && sale1.remaining === 214 && sale1.status === "partial", "vente : total 414, payé 200, reste 214, statut partiel", JSON.stringify({ t: sale1.total, p: sale1.paid, r: sale1.remaining, s: sale1.status }));
+  ok(sale1.date && sale1.date.__ts > Date.now() - 60000, "la date de la vente est ajoutée automatiquement");
+  ok(sale1.buyerName === "Marie" && !!sale1.dueDate, "acheteur et date d'échéance enregistrés");
+  ok(d4.products[hp.id].qty === 1, "le stock HP passe de 2 à 1");
+  await admin.click("#modal-root [data-action=close-modal]");
+
+  section("Vente anonyme, payée en totalité, sans nom d'acheteur");
+  await admin.click("[data-action=new-sale]");
+  await admin.selectOption("[name=productId]", anker.id);
+  await admin.fill("[name=qty]", "2");
+  await submitModal(admin);
+  await admin.waitForSelector("#btn-receipt");
+  const d5 = await dump(admin);
+  const sale2 = Object.values(d5.sales).find((s) => s.productId === anker.id);
+  ok(sale2.buyerName === "" && sale2.status === "paid" && sale2.remaining === 0 && sale2.total === 110.4, "anonyme, soldée, 2 × 55,2 = 110,4");
+  await admin.click("#modal-root [data-action=close-modal]");
+
+  section("Encaissement du solde de Marie (reste 214)");
+  await go(admin, "debts");
+  ok(norm(await admin.locator(".card.flush .table tbody").innerText()).includes("Marie"), "la créance de Marie apparaît dans « Créances »");
+  ok(await admin.locator("a[href^='https://wa.me/243990001122']").count() === 1, "lien WhatsApp de rappel (indicatif 243 ajouté au numéro)");
+  await admin.screenshot({ path: SHOTS + "/12-debts.png" });
+  await admin.click("[data-action=pay-sale]");
+  await admin.fill("[name=amount]", "100");
+  await submitModal(admin);
+  await admin.waitForTimeout(300);
+  let s1 = Object.values((await dump(admin)).sales).find((s) => s.buyerName === "Marie");
+  ok(s1.paid === 300 && s1.remaining === 114 && s1.status === "partial" && s1.payments.length === 2, "après 100 de plus : payé 300, reste 114, 2 paiements", JSON.stringify({ p: s1.paid, r: s1.remaining }));
+  await admin.click("[data-action=pay-sale]");
+  await admin.fill("[name=amount]", "114");
+  await submitModal(admin);
+  await admin.waitForTimeout(300);
+  s1 = Object.values((await dump(admin)).sales).find((s) => s.buyerName === "Marie");
+  ok(s1.status === "paid" && s1.remaining === 0 && s1.dueDate === null, "solde réglé : statut « soldé », plus d'échéance");
+
+  // ------------------------------------------------------------------ 5. Tableau de bord & bénéfices
+  section("Dépense de la boutique + tableau de bord");
+  await go(admin, "expenses");
+  await admin.click("[data-action=add-expense]");
+  await admin.fill("#modal-root [name=amount]", "50");
+  await admin.selectOption("#modal-root [name=category]", "Loyer");
+  await submitModal(admin);
+  await admin.waitForTimeout(300);
+  ok(Object.values((await dump(admin)).expenses).length === 1, "dépense « Loyer » enregistrée");
+  await go(admin, "dashboard");
+  const dash = norm(await admin.locator(".kpi-grid").innerText());
+  console.log("  " + dash.replace(/\n+/g, " | ").slice(0, 330));
+  ok(/87,4/.test(dash), "bénéfice brut = (414 − 345) + (110,4 − 92) = 87,40");
+  ok(/37,4/.test(dash), "bénéfice net = 87,40 − 50 de loyer = 37,40");
+  ok(/524,4/.test(dash), "ventes = 414 + 110,4 = 524,40");
+  await admin.screenshot({ path: SHOTS + "/13-dashboard.png", fullPage: true });
+
+  section("Rapports : bénéfice par produit et par commande");
+  await go(admin, "reports");
+  const rep = norm(await admin.locator(".view").innerText());
+  ok(rep.includes("EliteBook") && /69/.test(rep), "rapport par produit : EliteBook, bénéfice 69");
+  await admin.screenshot({ path: SHOTS + "/14-reports.png", fullPage: true });
+  await go(admin, "movements");
+  const mv = norm(await admin.locator(".view").innerText());
+  ok(mv.includes("EliteBook") && /Entrée|entrée/.test(mv), "entrées & sorties de stock listées");
+  await admin.click("button.tab:has-text('Mouvements d')>>nth=1");
+  await admin.waitForTimeout(200);
+  const cash = norm(await admin.locator(".view").innerText());
+  ok(/850/.test(cash) && /70,00/.test(cash) && /200/.test(cash), "mouvements d'argent : achat 850 + transport 70 (sorties) et encaissements (entrées)", cash.slice(0, 120).replace(/\n/g, " "));
+
+  // ------------------------------------------------------------------ 6. Employé
+  section("Employé : connexion et droits limités");
+  await emp.goto(BASE);
+  await emp.waitForSelector("[data-submit=login]");
+  await emp.fill("[name=email]", "jean@test.com");
+  await emp.fill("[name=password]", "jean123");
+  await emp.click(".auth-card button[type=submit]");
+  await emp.waitForSelector(".sidebar", { timeout: 8000 });
+  const navEmp = (await emp.locator(".sidebar .nav a").allInnerTexts()).map((s) => s.trim());
+  console.log("  menu employé :", navEmp.join(" · "));
+  ok(!navEmp.some((n) => /Commandes|Rapports|Entrées|Bénéfices/.test(n)), "le menu employé n'a ni Commandes, ni Rapports, ni Entrées & sorties");
+  ok(navEmp.some((n) => n.includes("Arrivages")) && navEmp.some((n) => n.includes("Ventes")), "mais il a Ventes et Arrivages");
+  await go(emp, "stock");
+  const stockHead = norm(await emp.locator(".table thead").innerText());
+  ok(!/Coût|Marge/i.test(stockHead), "la page Stock de l'employé n'affiche ni coût ni marge", stockHead.replace(/\n/g, " "));
+  await emp.screenshot({ path: SHOTS + "/15-employee-stock.png" });
+  await emp.goto(BASE + "#/orders");
+  await emp.waitForTimeout(300);
+  ok((await emp.locator("#page-title").innerText()) === "Tableau de bord", "l'accès direct à /orders est refusé (retour au tableau de bord)");
+  const dashE = norm(await emp.locator(".view").innerText());
+  ok(!/Bénéfice|bénéfice/.test(dashE), "le tableau de bord employé ne montre aucun bénéfice");
+
+  section("Employé : vente de 1 chargeur à 55,2, paiement partiel");
+  await go(emp, "sales");
+  await emp.click("[data-action=new-sale]");
+  await emp.selectOption("[name=productId]", anker.id);
+  await emp.fill("[name=buyerName]", "Client du jour");
+  await emp.check("[name=payMode][value=none]");
+  await emp.fill("[name=dueDate]", "2026-11-10");
+  await submitModal(emp);
+  await emp.waitForSelector("#btn-receipt");
+  const dE = await dump(emp);
+  const sale3 = Object.values(dE.sales).find((s) => s.buyerName === "Client du jour");
+  ok(sale3 && sale3.createdByName === "Jean Kalala" && sale3.status === "unpaid" && sale3.remaining === 55.2, "vente de l'employé enregistrée (impayée, reste 55,2, vendeur = Jean)");
+  ok(dE.products[anker.id].qty === 2, "stock Anker : 5 − 2 − 1 = 2");
+  const touched = [...new Set(await emp.evaluate(() => window.__fbWrites.map((w) => w.col)))];
+  console.log("  collections écrites par l'employé :", touched.join(", "));
+  ok(touched.every((c) => ["sales", "products", "movements", "users", "messages", "orderNotices"].includes(c)), "l'employé n'écrit jamais dans costs/orders/expenses (hors saisies autorisées)");
+  await emp.click("#modal-root [data-action=close-modal]");
+  await emp.screenshot({ path: SHOTS + "/16-employee-sales.png" });
+  const adminSees = await admin.evaluate(() => Object.values(window.__FB.__dump().sales).length);
+  ok(adminSees === 3, "l'administrateur voit immédiatement les 3 ventes (synchronisation)");
+
+  // ------------------------------------------------------------------ 7. Arrivage signalé par l'employé
+  section("Nouvelle commande → l'employé signale « colis arrivé » → l'admin est prévenu");
+  await go(admin, "orders");
+  await admin.click("[data-action=new-order]");
+  const M0 = admin.locator("#modal-root [data-line]").nth(0);
+  await M0.locator("[name=l_cat]").selectOption("telephone");
+  await M0.locator("[name=l_brand]").fill("Samsung");
+  await M0.locator("[name=l_name]").fill("Galaxy A15");
+  await M0.locator("[name=l_qty]").fill("10");
+  await M0.locator("[name=l_price]").fill("120");
+  await submitModal(admin);
+  await admin.waitForTimeout(300);
+  await go(emp, "arrivals");
+  ok(norm(await emp.locator(".view").innerText()).includes("Galaxy A15"), "l'employé voit la commande à recevoir (sans prix)");
+  ok(!/120|1 ?200/.test(norm(await emp.locator(".view").innerText()).replace(/CMD-\d+-\d+/g, "")), "aucun prix d'achat n'est visible côté employé");
+  await emp.click("[data-action=mark-arrived]");
+  await emp.fill("#modal-root [name=note]", "Tout est conforme");
+  await submitModal(emp);
+  await emp.waitForTimeout(400);
+  await admin.waitForTimeout(300);
+  await go(admin, "orders");
+  ok(norm(await admin.locator(".view").innerText()).includes("Colis arrivé"), "l'admin voit le statut « Colis arrivé » sur la commande");
+  ok(await admin.locator(".sidebar [data-badge=orders]:not([hidden])").count() === 1, "pastille d'alerte sur « Commandes » dans le menu");
+  ok(Object.values((await dump(admin)).messages).some((m) => /Colis arrivé/.test(m.text)), "un message automatique est posté dans la messagerie");
+  await admin.screenshot({ path: SHOTS + "/17-orders.png", fullPage: true });
+
+  // ------------------------------------------------------------------ 8. Messagerie
+  section("Messagerie : texte, photo, message vocal, lecture, suppression");
+  await go(emp, "chat");
+  await emp.fill("#chat-input", "Bonjour patron, le colis est arrivé");
+  await emp.click("[data-action=send-text]");
+  await emp.waitForSelector(".msg.mine .txt");
+  await go(admin, "chat");
+  await admin.waitForSelector(".msg.theirs");
+  ok(norm(await admin.locator(".chat-list").innerText()).includes("Bonjour patron"), "l'admin reçoit le message de l'employé");
+  await admin.fill("#chat-input", "Merci Jean 👍");
+  await admin.press("#chat-input", "Enter");
+  await emp.waitForSelector(".msg.theirs .txt");
+  ok(norm(await emp.locator(".chat-list").innerText()).includes("Merci Jean"), "l'employé reçoit la réponse (Entrée envoie)");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC", "base64");
+  await emp.setInputFiles("#chat-file", { name: "photo.png", mimeType: "image/png", buffer: png });
+  await emp.waitForSelector("img.chat-img", { timeout: 8000 });
+  ok(true, "une photo est envoyée et s'affiche");
+  await admin.waitForSelector("img.chat-img", { timeout: 8000 });
+  ok(true, "l'admin reçoit la photo");
+  await admin.click("[data-action=rec-start]");
+  await admin.waitForSelector(".rec");
+  await admin.waitForTimeout(1600);
+  await admin.click("[data-action=rec-send]");
+  await admin.waitForSelector(".voice", { timeout: 8000 });
+  ok(true, "un message vocal est enregistré, envoyé et affiché avec son lecteur");
+  await emp.waitForSelector(".voice", { timeout: 8000 });
+  const msgs = Object.values((await dump(admin)).messages);
+  ok(msgs.some((m) => m.type === "audio" && m.duration >= 1 && m.url.startsWith("data:audio")), "le vocal est stocké (mode sans Cloudinary, dans Firestore)");
+  ok(msgs.some((m) => (m.readBy || []).length === 2), "accusés de lecture : message lu par les deux", "");
+  await admin.screenshot({ path: SHOTS + "/18-chat.png" });
+  await emp.screenshot({ path: SHOTS + "/19-chat-employee.png" });
+  const unread = await admin.locator("[data-badge=chat]:not([hidden])").count();
+  ok(unread === 0, "plus de pastille « non lu » une fois la conversation ouverte");
+
+  // ------------------------------------------------------------------ 9. Annulation d'une vente (admin)
+  section("Annulation d'une vente par l'administrateur → stock remis");
+  await go(admin, "sales");
+  await admin.locator("tr[data-action=sale-detail]", { hasText: "Client du jour" }).first().click();
+  await admin.click("[data-action=cancel-sale]");
+  await admin.click("#confirm-root [data-c=yes]");
+  await admin.waitForTimeout(400);
+  const dC = await dump(admin);
+  ok(dC.products[anker.id].qty === 3, "stock Anker remis à 3 après annulation (2 + 1)");
+  ok(Object.values(dC.sales).filter((s) => s.status === "cancelled").length === 1, "la vente est marquée annulée (conservée dans l'historique)");
+  ok(Object.values(dC.movements).some((m) => m.reason === "cancel_sale"), "mouvement d'entrée « annulation » enregistré");
+
+  // ------------------------------------------------------------------ 10. Désactivation de l'employé
+  section("Désactivation de l'accès employé");
+  await go(admin, "settings");
+  await admin.click("[data-action=toggle-employee]");
+  await admin.click("#confirm-root [data-c=yes]");
+  await emp.waitForSelector("text=Accès désactivé", { timeout: 6000 });
+  ok(true, "l'employé désactivé est immédiatement bloqué");
+  await admin.click("[data-action=toggle-employee]");
+  await emp.waitForSelector(".sidebar", { timeout: 6000 });
+  ok(true, "réactivation : il retrouve son accès");
+
+  // ------------------------------------------------------------------ 11. Mobile
+  section("Affichage téléphone (390 × 844)");
+  const mob = await newPage(ctx, "mobile");
+  await mob.setViewportSize({ width: 390, height: 844 });
+  await mob.goto(BASE);
+  await mob.waitForSelector("[data-submit=login]");
+  await mob.fill("[name=email]", "admin@test.com"); await mob.fill("[name=password]", "secret123");
+  await mob.click(".auth-card button[type=submit]");
+  await mob.waitForSelector(".bottom-nav");
+  await mob.screenshot({ path: SHOTS + "/20-m-dashboard.png" });
+  await mob.goto(BASE + "#/sales"); await mob.waitForTimeout(250);
+  await mob.screenshot({ path: SHOTS + "/21-m-sales.png" });
+  await mob.click("[data-action=new-sale]"); await mob.waitForSelector("#modal-root form");
+  await mob.screenshot({ path: SHOTS + "/22-m-sale-form.png" });
+  await mob.click("#modal-root [data-action=close-modal]");
+  await mob.click(".bottom-nav button[data-action=toggle-menu]"); await mob.waitForTimeout(350);
+  await mob.screenshot({ path: SHOTS + "/23-m-menu.png" });
+  await mob.click(".scrim", { position: { x: 360, y: 400 } }); await mob.waitForTimeout(300);
+  await mob.goto(BASE + "#/chat"); await mob.waitForTimeout(300);
+  await mob.screenshot({ path: SHOTS + "/24-m-chat.png" });
+  const overflow = await mob.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  ok(!overflow, "aucun débordement horizontal sur téléphone");
+  await mob.goto(BASE + "#/stock"); await mob.waitForTimeout(250);
+  ok(!(await mob.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), "pas de débordement sur la page Stock mobile");
+  await mob.screenshot({ path: SHOTS + "/25-m-stock.png" });
+  await mob.goto(BASE + "#/orders"); await mob.waitForTimeout(250);
+  await mob.click("[data-action=new-order]"); await mob.waitForSelector("#modal-root form");
+  await mob.screenshot({ path: SHOTS + "/26-m-order-form.png" });
+
+  const errs = [...admin.errors, ...emp.errors, ...mob.errors];
+  section("Erreurs JavaScript pendant tout le scénario");
+  ok(errs.length === 0, "aucune erreur dans la console", errs.join("\n    "));
+} catch (e) {
+  fail++; console.log("\n✗ EXCEPTION :", e.message.split("\n").slice(0, 6).join("\n"));
+  await admin.screenshot({ path: SHOTS + "/99-failure-admin.png" }).catch(() => {});
+  await emp.screenshot({ path: SHOTS + "/99-failure-emp.png" }).catch(() => {});
+  console.log("erreurs page :", [...admin.errors, ...emp.errors]);
+}
+console.log(`\n${pass} vérifications réussies, ${fail} échec(s)`);
+await browser.close();
+process.exit(fail ? 1 : 0);

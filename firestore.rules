@@ -1,0 +1,130 @@
+rules_version = '2';
+
+// Règles de sécurité Firestore — à publier dans Firebase > Firestore Database > Règles
+// Deux rôles : "admin" (propriétaire) et "employee" (travailleur).
+// Les coûts d'achat, bénéfices, commandes et dépenses sont réservés à l'administrateur
+// (ils sont dans des collections séparées que l'employé ne peut pas lire).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Fonctions utilitaires ----------
+    function signedIn() { return request.auth != null; }
+    function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(profilePath()); }
+    function profile() { return get(profilePath()).data; }
+    function isActive() { return hasProfile() && profile().active == true; }
+    function isAdmin() { return isActive() && profile().role == 'admin'; }
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // ---------- Premier lancement ----------
+    // Lisible sans connexion (pour savoir s'il faut afficher l'écran "Première utilisation")
+    match /meta/setup {
+      allow get: if true;
+      allow create: if signedIn() && !exists(/databases/$(database)/documents/meta/setup);
+      allow update, delete: if false;
+    }
+
+    // ---------- Utilisateurs ----------
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if isActive();
+      // 1er compte : administrateur, uniquement tant que la boutique n'est pas initialisée
+      allow create: if isAdmin()
+        || (signedIn() && request.auth.uid == uid
+            && request.resource.data.role == 'admin'
+            && request.resource.data.active == true
+            && !exists(/databases/$(database)/documents/meta/setup));
+      allow update: if isAdmin()
+        || (isActive() && request.auth.uid == uid && onlyChanges(['lastSeen']));
+      allow delete: if false;
+    }
+
+    // ---------- Paramètres de la boutique ----------
+    match /settings/{id} {
+      allow read: if isActive();
+      allow create: if isAdmin()
+        || (signedIn() && !exists(/databases/$(database)/documents/meta/setup));
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- Produits (stock) : visibles par tous, sans coût d'achat ----------
+    match /products/{id} {
+      allow read: if isActive();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isActive() && onlyChanges(['qty', 'updatedAt'])
+            && request.resource.data.qty >= 0
+            && request.resource.data.qty < resource.data.qty);   // l'employé ne peut que diminuer (vente)
+    }
+
+    // ---------- Coûts de revient : ADMIN uniquement ----------
+    match /costs/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------- Ventes ----------
+    match /sales/{id} {
+      allow read: if isActive();
+      allow create: if isActive()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.date == request.time          // date automatique
+        && request.resource.data.qty > 0
+        && request.resource.data.unitPrice >= 0
+        && math.abs(request.resource.data.total - request.resource.data.qty * request.resource.data.unitPrice) < 0.01
+        && request.resource.data.paid >= 0
+        && request.resource.data.paid <= request.resource.data.total
+        && request.resource.data.status in ['paid', 'partial', 'unpaid'];
+      // Encaissement d'un solde : l'employé ne peut modifier que les champs de paiement
+      allow update: if isAdmin()
+        || (isActive() && onlyChanges(['paid', 'remaining', 'status', 'payments', 'dueDate'])
+            && resource.data.status != 'cancelled'
+            && request.resource.data.status in ['paid', 'partial', 'unpaid']
+            && request.resource.data.paid >= resource.data.paid
+            && request.resource.data.paid <= resource.data.total);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Mouvements de stock (entrées / sorties) ----------
+    match /movements/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        || (isActive() && request.resource.data.type == 'out'
+            && request.resource.data.reason == 'sale'
+            && request.resource.data.by == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- Commandes : ADMIN uniquement ----------
+    match /orders/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------- Avis d'arrivage : l'employé peut signaler "colis arrivé" ----------
+    match /orderNotices/{id} {
+      allow read: if isActive();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isActive() && onlyChanges(['arrived', 'arrivedAt', 'arrivedBy', 'arrivedByName', 'note']));
+    }
+
+    // ---------- Dépenses de la boutique ----------
+    match /expenses/{id} {
+      allow read: if isAdmin() || (isActive() && resource.data.createdBy == request.auth.uid);
+      allow create: if isAdmin() || (isActive() && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- Messagerie ----------
+    match /messages/{id} {
+      allow read: if isActive();
+      allow create: if isActive()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if isActive() && onlyChanges(['readBy']);
+      allow delete: if isActive() && (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+  }
+}

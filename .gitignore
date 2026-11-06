@@ -1,0 +1,5 @@
+/js/firebase-config.local.js
+/.firebaserc
+/node_modules/
+/firebase-debug.log
+/ui-debug.log

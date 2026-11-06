@@ -1,0 +1,10 @@
+import { launch, newPage, BASE } from "./harness.mjs";
+const SHOTS = process.argv[2];
+const { browser, ctx } = await launch({ viewport: { width: 1280, height: 800 } });
+const page = await newPage(ctx);
+await page.goto(BASE);
+await page.waitForSelector(".auth-card form");
+console.log("écran :", (await page.locator(".auth-card").innerText()).split("\n").slice(0, 4).join(" | "));
+await page.screenshot({ path: SHOTS + "/01-setup.png" });
+console.log("erreurs:", page.errors);
+await browser.close();
