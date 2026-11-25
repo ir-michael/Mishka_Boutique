@@ -108,11 +108,15 @@ submits.saveRemittance = async (form) => {
       adminConfirmedAt: null, adminConfirmedBy: null, rejectedAt: null, rejectedBy: null,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     }));
-    await addDoc(collection(db, "notifications"), {
+    try {
+      await addDoc(collection(db, "notifications"), {
       recipientRole: "admin", recipientUid: "all-admins", title: "Nouvelle remise d'argent",
       message: `${me.name} propose une remise de ${fm(amount)} pour ${saleIds.length} vente(s).`,
-      readBy: [], createdAt: serverTimestamp(), kind: "remittance",
-    });
+        readBy: [], createdAt: serverTimestamp(), kind: "remittance",
+      });
+    } catch (notificationError) {
+      console.warn("Remise créée, notification impossible", notificationError);
+    }
     closeModal();
     toast("Remise envoyée à l'administrateur.", "success", 6000);
   } catch (error) { toast(friendlyError(error), "error", 5000); }
