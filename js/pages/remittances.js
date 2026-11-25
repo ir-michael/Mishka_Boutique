@@ -5,12 +5,20 @@ import { actions, submits, getF, periodSelect } from "../core.js";
 import { num, round2, inPeriod, toDate } from "../logic.js";
 
 function paidSalesNotInRemittance() {
-  const selected = new Set();
+  const allocated = new Map();
   for (const remittance of state.remittances) {
     if (remittance.status === "rejected") continue;
-    for (const id of remittance.saleIds || []) selected.add(id);
+    for (const id of remittance.saleIds || []) {
+      allocated.set(id, true);
+    }
   }
-  return state.sales.filter((sale) => sale.status !== "cancelled" && num(sale.paid) > 0 && !selected.has(sale.id));
+  return state.sales
+    .filter((sale) => sale.status !== "cancelled" && sale.createdBy === state.me.uid && num(sale.paid) > 0)
+    .filter((sale) => !allocated.has(sale.id))
+    .map((sale) => ({
+      ...sale,
+      remittanceAmount: round2(num(sale.paid)),
+    }));
 }
 
 function statusFor(remittance) {
@@ -48,8 +56,8 @@ actions["new-remittance"] = () => {
     <form data-submit="saveRemittance" class="form">
       <p class="muted">Sélectionnez les ventes dont l'argent est remis. Le montant total sera calculé depuis les paiements encaissés de chaque vente.</p>
       <div class="remittance-sales">${sales.map((sale) => `
-        <label class="remittance-row"><input type="checkbox" name="saleId" value="${esc(sale.id)}" data-amount="${num(sale.paid)}">
-          <span><strong>${esc(sale.brand || "")} ${esc(sale.productName)}</strong><br><span class="muted small">${esc(sale.buyerName || "Anonyme")} · ${sale.paid != null ? fm(sale.paid) : fm(0)} encaissé</span></span></label>`).join("")}</div>
+        <label class="remittance-row"><input type="checkbox" name="saleId" value="${esc(sale.id)}" data-amount="${sale.remittanceAmount}">
+          <span><strong>${esc(sale.brand || "")} ${esc(sale.productName)}</strong> × ${sale.qty}<br><span class="muted small">Acheteur : ${esc(sale.buyerName || "Anonyme")} · ${fm(sale.unitPrice)} l'unité · ${fm(sale.remittanceAmount)} encaissé</span></span></label>`).join("")}</div>
       <div class="summary-bar"><div><span class="muted">Montant de la remise</span><strong id="remittance-total" class="pos">${fm(0)}</strong></div></div>
       <label class="field"><span>Note <em>(facultatif)</em></span><input class="input" name="note"></label>
       <div class="row end gap"><button type="button" class="btn ghost" data-action="close-modal">Annuler</button>
@@ -76,6 +84,8 @@ submits.saveRemittance = async (form) => {
   if (!selected.length) return toast("Sélectionnez au moins une vente.", "error");
   const saleIds = selected.map((input) => input.value);
   const amount = round2(selected.reduce((sum, input) => sum + num(input.dataset.amount), 0));
+  const staleIds = saleIds.filter((id) => !paidSalesNotInRemittance().some((sale) => sale.id === id));
+  if (staleIds.length) return toast("Une ou plusieurs ventes ont déjà été mises dans une autre remise.", "error");
   if (!(amount > 0)) return toast("Le montant sélectionné doit être supérieur à zéro.", "error");
   const me = state.me;
   try {
@@ -85,6 +95,11 @@ submits.saveRemittance = async (form) => {
       adminConfirmedAt: null, adminConfirmedBy: null, rejectedAt: null, rejectedBy: null,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     }));
+    await addDoc(collection(db, "notifications"), {
+      recipientRole: "admin", recipientUid: "all-admins", title: "Nouvelle remise d'argent",
+      message: `${me.name} propose une remise de ${fm(amount)} pour ${saleIds.length} vente(s).`,
+      readBy: [], createdAt: serverTimestamp(), kind: "remittance",
+    });
     closeModal();
     toast("Remise envoyée à l'administrateur.", "success", 6000);
   } catch (error) { toast(friendlyError(error), "error", 5000); }
@@ -99,6 +114,11 @@ actions["confirm-remittance"] = async (el) => {
       status: "confirmed", adminConfirmedAt: serverTimestamp(), adminConfirmedBy: state.me.uid,
       updatedAt: serverTimestamp(),
     });
+    await addDoc(collection(db, "notifications"), {
+      recipientUid: item.employeeUid, title: "Remise confirmée",
+      message: `Votre remise de ${fm(item.amount)} a été confirmée par l'administrateur.`,
+      readBy: [], createdAt: serverTimestamp(), kind: "remittance-confirmed",
+    });
     toast("Remise confirmée par les deux parties.", "success");
   } catch (error) { toast(friendlyError(error), "error", 5000); }
 };
@@ -111,6 +131,11 @@ actions["reject-remittance"] = async (el) => {
     await updateDoc(doc(db, "remittances", item.id), {
       status: "rejected", rejectedAt: serverTimestamp(), rejectedBy: state.me.uid,
       updatedAt: serverTimestamp(),
+    });
+    await addDoc(collection(db, "notifications"), {
+      recipientUid: item.employeeUid, title: "Remise refusée",
+      message: `Votre remise de ${fm(item.amount)} a été refusée. Elle pourra être corrigée.`,
+      readBy: [], createdAt: serverTimestamp(), kind: "remittance-rejected",
     });
     toast("Remise refusée.", "success");
   } catch (error) { toast(friendlyError(error), "error", 5000); }

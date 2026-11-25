@@ -40,7 +40,7 @@ let started = null;       // uid pour lequel le store est démarré
 // ============================================================
 const authCard = (inner) => `
   <div class="auth-screen"><div class="auth-card">
-    <div class="auth-brand"><div class="logo">${icon("box", 26)}</div><h1>Gestion Boutique</h1><p class="muted">Ventes · Stock · Commandes · Messagerie</p></div>
+    <div class="auth-brand"><div class="logo brand-logo"><img src="icons/icon.png" alt="Logo Mishka Boutique"></div><h1>Gestion Boutique</h1><p class="muted">Ventes · Stock · Commandes · Messagerie</p></div>
     ${inner}</div></div>`;
 
 function showSplash(text = "Chargement…") {
@@ -195,7 +195,7 @@ function showShell() {
   root.innerHTML = `
     <div class="app">
       <aside class="sidebar" id="sidebar">
-        <div class="brand"><div class="logo">${icon("box", 22)}</div><div><strong id="shop-name"></strong><span class="muted small">${state.me.role === "admin" ? "Administrateur" : "Employé"}</span></div></div>
+        <div class="brand"><div class="logo brand-logo"><img src="icons/icon.png" alt="Logo de la boutique"></div><div><strong id="shop-name"></strong><span class="muted small">${state.me.role === "admin" ? "Administrateur" : "Employé"}</span></div></div>
         <nav class="nav">${nav.map((p) => `<a href="#/${p.id}" data-nav="${p.id}">${icon(p.icon, 19)}<span>${esc(pageLabel(p))}</span><i class="badge" data-badge="${p.id}" hidden></i></a>`).join("")}</nav>
         <div class="side-foot"><div class="who-am-i"><div class="avatar">${esc((state.me.name || "?")[0].toUpperCase())}</div>
           <div><strong>${esc(state.me.name)}</strong><span class="muted small">${esc(state.me.email || "")}</span></div></div>
@@ -208,7 +208,7 @@ function showShell() {
           <h1 id="page-title"></h1>
           <span class="pill offline" id="offline-pill" hidden>${icon("alert", 14)} Hors ligne</span>
           <button class="btn sm primary" id="sync-sales" data-action="sync-sales" type="button" hidden></button>
-          <button class="icon-btn" id="notif-btn" data-action="enable-notif" title="Activer les notifications" hidden aria-label="Activer les notifications">${icon("chat", 20)}</button>
+          <button class="icon-btn" id="notif-btn" data-action="enable-notif" title="Notifications" aria-label="Notifications">${icon("bell", 20)}<i class="badge" id="notif-count" hidden></i></button>
         </header>
         <main id="view" class="view"></main>
       </div>
@@ -231,6 +231,9 @@ function paintChrome() {
   document.getElementById("page-title").textContent = p.title;
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === p.id));
   const unread = unreadCount();
+  const notificationUnread = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid)).length;
+  const notifCount = document.getElementById("notif-count");
+  if (notifCount) { notifCount.hidden = notificationUnread === 0; notifCount.textContent = notificationUnread > 9 ? "9+" : notificationUnread; }
   const counts = { chat: unread };
   if (state.me.role === "admin") counts.orders = state.notices.filter((n) => n.status === "pending" && n.arrived).length;
   document.querySelectorAll("[data-badge]").forEach((b) => {
@@ -364,10 +367,20 @@ function syncNotifButton() {
   if (b) b.hidden = !("Notification" in window) || Notification.permission !== "default";
 }
 actions["enable-notif"] = async () => {
-  if (!("Notification" in window)) return;
-  const r = await Notification.requestPermission();
+  if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+  const items = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid));
+  const body = items.length ? `<div class="list">${items.map((item) => `<button class="list-row notification-row" data-action="read-notification" data-id="${esc(item.id)}"><div class="grow"><strong>${esc(item.title)}</strong><div class="muted small">${esc(item.message)}</div></div></button>`).join("")}</div>` : `<div class="empty"><p>Aucune nouvelle notification.</p></div>`;
+  openModal("Notifications", body);
   syncNotifButton();
-  toast(r === "granted" ? "Notifications activées ✓" : "Notifications refusées.", r === "granted" ? "success" : "info");
+};
+
+actions["read-notification"] = async (el) => {
+  const item = state.notifications.find((row) => row.id === el.dataset.id);
+  if (!item) return;
+  try {
+    await updateDoc(doc(db, "notifications", item.id), { readBy: [...new Set([...(item.readBy || []), state.me.uid])], readAt: serverTimestamp() });
+    closeModal();
+  } catch (error) { toast(friendlyError(error), "error"); }
 };
 
 function beep() {

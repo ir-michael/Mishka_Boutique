@@ -25,17 +25,17 @@ function render() {
     return status === "all" || operation.status === status;
   });
   return `
-    <div class="page-head"><div><h2>Opérations</h2><p class="muted">Articles confiés aux commissionnaires</p></div>
+    <div class="page-head"><div><h2>Opérations</h2><p class="muted">Articles confiés aux cascadeurs</p></div>
       <button class="btn primary" data-action="new-operation">${icon("plus")} Nouvelle opération</button></div>
     <div class="toolbar">${periodSelect("operations.period", "month")}
       <select class="select" data-filter="operations.status">
         ${[["all", "Tous les statuts"], ["pending", "En opération"], ["sold", "Ventes conclues"], ["failed", "Sans vente"]].map(([value, label]) =>
           `<option value="${value}" ${value === status ? "selected" : ""}>${label}</option>`).join("")}
       </select></div>
-    <section class="card flush">${list.length ? `<table class="table responsive"><thead><tr><th>Date</th><th>Commissionnaire</th><th>Produit</th><th class="num">Qté</th><th>Statut</th><th></th></tr></thead><tbody>
+    <section class="card flush">${list.length ? `<table class="table responsive"><thead><tr><th>Date</th><th>Cascadeur</th><th>Produit</th><th class="num">Qté</th><th>Statut</th><th></th></tr></thead><tbody>
       ${list.map((operation) => `<tr>
         <td data-label="Date">${fmtDateTime(operation.createdAt)}</td>
-        <td data-label="Commissionnaire"><strong>${esc(operation.operatorName)}</strong><div class="muted small">${esc(operation.operatorPhone || "—")}</div></td>
+        <td data-label="Cascadeur"><strong>${esc(operation.operatorName)}</strong><div class="muted small">${esc(operation.operatorPhone || "—")}</div></td>
         <td data-label="Produit">${esc(operation.brand || "")} ${esc(operation.productName)}</td>
         <td data-label="Qté" class="num">${operation.qty}</td>
         <td data-label="Statut">${statusLabel(operation.status)}</td>
@@ -53,7 +53,7 @@ function operationOptions() {
 actions["new-operation"] = () => openModal("Nouvelle opération", `
   <form data-submit="saveOperation" class="form">
     <div class="grid-2">
-      <label class="field"><span>Nom du commissionnaire</span><input class="input" name="operatorName" required></label>
+      <label class="field"><span>Nom du cascadeur</span><input class="input" name="operatorName" required></label>
       <label class="field"><span>Numéro de téléphone</span><input class="input" name="operatorPhone" type="tel" required></label>
     </div>
     <label class="field"><span>Produit confié</span><select class="select" name="productId" required><option value="">Choisir un produit</option>${operationOptions()}</select></label>

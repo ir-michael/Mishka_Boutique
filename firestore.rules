@@ -159,6 +159,17 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ---------- Notifications internes ----------
+    match /notifications/{id} {
+      allow read: if isAdmin()
+        || (isActive() && (resource.data.recipientUid == request.auth.uid || resource.data.recipientUid == 'all-admins'));
+      allow create: if isActive();
+      allow update: if isActive()
+        && onlyChanges(['readBy', 'readAt'])
+        && (isAdmin() || resource.data.recipientUid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
     // ---------- Messagerie ----------
     match /messages/{id} {
       allow read: if isActive();

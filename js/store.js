@@ -13,7 +13,7 @@ function fresh() {
     me: null,               // { uid, name, email, role, active }
     shop: { ...DEFAULT_SHOP },
     products: [], costs: {}, sales: [], orders: [], notices: [], movements: [], expenses: [],
-    operations: [], remittances: [], capitalEntries: [], personalExpenses: [],
+    operations: [], remittances: [], capitalEntries: [], personalExpenses: [], notifications: [],
     users: [], messages: [],
     ready: {},
     chatLimit: 60,
@@ -70,6 +70,9 @@ export function startStore(me) {
   listen("sales", query(collection(db, "sales"), orderBy("date", "desc")));
   listen("notices", collection(db, "orderNotices"));
   listen("users", collection(db, "users"));
+  listen("notifications", admin
+    ? query(collection(db, "notifications"), where("recipientUid", "in", [me.uid, "all-admins"]), limit(50))
+    : query(collection(db, "notifications"), where("recipientUid", "==", me.uid), limit(50)));
   unsubs.push(onSnapshot(doc(db, "settings", "shop"), (d) => {
     state.shop = { ...DEFAULT_SHOP, ...(d.exists() ? d.data() : {}) };
     state.ready.shop = true; emit();
