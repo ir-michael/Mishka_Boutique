@@ -1,5 +1,5 @@
 import {
-  db, collection, doc, runTransaction, serverTimestamp, Timestamp,
+  db, collection, doc, addDoc, runTransaction, serverTimestamp, Timestamp,
 } from "../fb.js";
 import { state, isAdmin, productById } from "../store.js";
 import {
@@ -9,6 +9,8 @@ import {
 import { actions, submits, getF, periodSelect, rerender } from "../core.js";
 import { num, round2, paymentStatus, remaining, inPeriod } from "../logic.js";
 import { CATEGORIES } from "../config.js";
+
+const operationNameForNotification = (product) => `${product.brand || ""} ${product.name}`.trim();
 
 const statusLabel = (status) => {
   if (status === "pending") return chip("En opération", "amber");
@@ -57,7 +59,10 @@ actions["new-operation"] = () => openModal("Nouvelle opération", `
       <label class="field"><span>Numéro de téléphone</span><input class="input" name="operatorPhone" type="tel" required></label>
     </div>
     <label class="field"><span>Produit confié</span><select class="select" name="productId" required><option value="">Choisir un produit</option>${operationOptions()}</select></label>
-    <label class="field"><span>Nombre d'articles</span><input class="input" type="number" name="qty" min="1" step="1" value="1" required></label>
+    <div class="grid-2">
+      <label class="field"><span>Nombre d'articles</span><input class="input" type="number" name="qty" min="1" step="1" value="1" required></label>
+      <label class="field"><span>Prix cascadeur <em>(facultatif)</em></span><input class="input" type="number" name="unitPrice" min="0" step="0.01" inputmode="decimal"></label>
+    </div>
     <label class="field"><span>Note <em>(facultatif)</em></span><input class="input" name="note"></label>
     <div class="row end gap"><button type="button" class="btn ghost" data-action="close-modal">Annuler</button>
       <button class="btn primary" type="submit">Enregistrer l'opération</button></div>
@@ -80,7 +85,7 @@ submits.saveOperation = async (form) => {
       if (!current || num(current.qty) < qty) throw new Error("Stock insuffisant.");
       tx.update(productRef, { qty: num(current.qty) - qty, updatedAt: serverTimestamp() });
       tx.set(operationRef, {
-        operatorName: d.operatorName, operatorPhone: d.operatorPhone, note: d.note || "",
+        operatorName: d.operatorName, operatorPhone: d.operatorPhone, note: d.note || "", unitPrice: d.unitPrice === "" ? null : round2(num(d.unitPrice)),
         productId: product.id, productName: product.name, brand: product.brand || "", category: product.category || "autre",
         qty, status: "pending", saleId: null, createdBy: me.uid, createdByName: me.name,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -91,6 +96,13 @@ submits.saveOperation = async (form) => {
         note: `À ${d.operatorName}`, date: serverTimestamp(), by: me.uid, byName: me.name,
       });
     }));
+    try {
+      await addDoc(collection(db, "notifications"), {
+        recipientUid: "all-admins", title: "Nouvelle opération Cascadeur",
+        message: `${me.name} a confié ${qty} article(s) de ${operationNameForNotification(product)} à ${d.operatorName}.`,
+        readBy: [], createdAt: serverTimestamp(), kind: "operation",
+      });
+    } catch {}
     toast("Opération enregistrée. Les articles sont réservés.", "success");
     closeModal();
   } catch (error) { toast(friendlyError(error), "error", 5000); }
@@ -116,6 +128,13 @@ actions["fail-operation"] = async (el) => {
         note: `Retour de ${operation.operatorName}`, date: serverTimestamp(), by: state.me.uid, byName: state.me.name,
       });
     });
+    try {
+      await addDoc(collection(db, "notifications"), {
+        recipientUid: "all-admins", title: "Opération sans vente",
+        message: `${operation.operatorName} n'a pas conclu l'opération sur ${operation.qty} article(s). Le stock a été remis.`,
+        readBy: [], createdAt: serverTimestamp(), kind: "operation-return",
+      });
+    } catch {}
     toast("Opération terminée sans vente. Stock remis.", "success");
   } catch (error) { toast(friendlyError(error), "error", 5000); }
 };
@@ -128,7 +147,7 @@ actions["conclude-operation"] = (el) => {
       <input type="hidden" name="id" value="${esc(operation.id)}">
       <p><strong>${esc(operation.operatorName)}</strong> — ${esc(operation.brand || "")} ${esc(operation.productName)} × ${operation.qty}</p>
       <div class="grid-2">
-        <label class="field"><span>Prix unitaire</span><input class="input" type="number" name="unitPrice" min="0" step="0.01" value="${esc(productById(operation.productId)?.sellPrice ?? "")}" required></label>
+        <label class="field"><span>Prix unitaire</span><input class="input" type="number" name="unitPrice" min="0" step="0.01" value="${esc(operation.unitPrice ?? productById(operation.productId)?.sellPrice ?? "")}" required></label>
         <label class="field"><span>Montant payé</span><input class="input" type="number" name="paid" min="0" step="0.01" value="0" required></label>
       </div>
       <label class="field"><span>Acheteur <em>(facultatif)</em></span><input class="input" name="buyerName" value="${esc(operation.operatorName)}"></label>
@@ -169,6 +188,13 @@ submits.completeOperation = async (form) => {
       });
       tx.update(operationRef, { status: "sold", saleId, concludedAt: serverTimestamp(), concludedBy: me.uid, concludedByName: me.name, updatedAt: serverTimestamp() });
     }));
+    try {
+      await addDoc(collection(db, "notifications"), {
+        recipientUid: "all-admins", title: "Opération conclue",
+        message: `${operation.operatorName} a conclu une vente de ${qty} article(s) pour ${fm(total)}.`,
+        readBy: [], createdAt: serverTimestamp(), kind: "operation-sold",
+      });
+    } catch {}
     closeModal();
     rerender();
     toast("Opération conclue : vente créée automatiquement.", "success", 6000);

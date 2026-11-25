@@ -34,6 +34,8 @@ let profileUnsub = null;
 let settingUp = false;
 let missingTimer = null;
 let started = null;       // uid pour lequel le store est démarré
+let notificationsInitialized = false;
+const knownNotificationIds = new Set();
 
 // ============================================================
 //  Écrans hors application (chargement, connexion, première utilisation…)
@@ -158,6 +160,8 @@ function watchProfile(user) {
     const me = { uid: user.uid, email: user.email, name: p.name, role: p.role, active: true };
     if (started !== user.uid || state.me?.role !== me.role) {
       started = user.uid;
+      notificationsInitialized = false;
+      knownNotificationIds.clear();
       startStore(me);
       showShell();
     } else {
@@ -232,6 +236,22 @@ function paintChrome() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === p.id));
   const unread = unreadCount();
   const notificationUnread = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid)).length;
+  if (!notificationsInitialized) {
+    state.notifications.forEach((item) => knownNotificationIds.add(item.id));
+    notificationsInitialized = true;
+  } else {
+    for (const item of state.notifications) {
+      if (!knownNotificationIds.has(item.id)) {
+        knownNotificationIds.add(item.id);
+        if (!item.readBy?.includes(state.me.uid)) {
+          toast(`${item.title} — ${item.message}`, "info", 6000);
+          if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+            try { new Notification(item.title, { body: item.message, icon: "icons/icon.png", tag: item.id }); } catch {}
+          }
+        }
+      }
+    }
+  }
   const notifCount = document.getElementById("notif-count");
   if (notifCount) { notifCount.hidden = notificationUnread === 0; notifCount.textContent = notificationUnread > 9 ? "9+" : notificationUnread; }
   const counts = { chat: unread };
@@ -364,7 +384,7 @@ window.addEventListener("offline", () => {
 
 function syncNotifButton() {
   const b = document.getElementById("notif-btn");
-  if (b) b.hidden = !("Notification" in window) || Notification.permission !== "default";
+  if (b) b.hidden = false;
 }
 actions["enable-notif"] = async () => {
   if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission();

@@ -396,5 +396,11 @@ a.alert:hover { filter: brightness(.97); }
 @media (max-width: 420px) {
   .kpi-grid { grid-template-columns: 1fr; }
 }
+.remittance-review { display: grid; gap: 8px; }
+.remittance-review-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 10px 0; }
+.remittance-review-row:last-child { border-bottom: 0; }
+@media (max-width: 620px) {
+  .remittance-review-row { align-items: flex-start; flex-direction: column; }
+}
 @media print { .sidebar, .topbar, .bottom-nav, #toasts { display: none !important; } .app { display: block; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
