@@ -1,24 +1,35 @@
 import { db, collection, doc, addDoc, updateDoc, serverTimestamp, Timestamp } from "../fb.js";
 import { state, isAdmin } from "../store.js";
-import { esc, fm, fmtDateTime, icon, chip, empty, openModal, closeModal, toast, busy, friendlyError, confirmBox } from "../ui.js";
+import { esc, fm, fmtDate, fmtDateTime, icon, chip, empty, openModal, closeModal, toast, busy, formData, friendlyError, confirmBox } from "../ui.js";
 import { actions, submits, getF, periodSelect } from "../core.js";
 import { num, round2, inPeriod, toDate } from "../logic.js";
 
-function paidSalesNotInRemittance() {
+function remittedBySale() {
   const allocated = new Map();
   for (const remittance of state.remittances) {
     if (remittance.status === "rejected") continue;
-    for (const id of remittance.saleIds || []) {
-      allocated.set(id, true);
+    for (const item of remittance.saleItems || []) {
+      allocated.set(item.saleId, round2(num(allocated.get(item.saleId)) + num(item.amount)));
+    }
+    if (!remittance.saleItems?.length) {
+      for (const saleId of remittance.saleIds || []) {
+        const sale = state.sales.find((row) => row.id === saleId);
+        if (sale) allocated.set(saleId, round2(num(allocated.get(saleId)) + num(sale.paid)));
+      }
     }
   }
+  return allocated;
+}
+
+function paidSalesNotInRemittance() {
+  const allocated = remittedBySale();
   return state.sales
     .filter((sale) => sale.status !== "cancelled" && sale.createdBy === state.me.uid && num(sale.paid) > 0)
-    .filter((sale) => !allocated.has(sale.id))
-    .map((sale) => ({
-      ...sale,
-      remittanceAmount: round2(num(sale.paid)),
-    }));
+    .map((sale) => {
+      const alreadyRemitted = round2(num(allocated.get(sale.id)));
+      return { ...sale, alreadyRemitted, remittanceAmount: round2(num(sale.paid) - alreadyRemitted) };
+    })
+    .filter((sale) => sale.remittanceAmount > 0);
 }
 
 function statusFor(remittance) {
@@ -57,7 +68,8 @@ actions["new-remittance"] = () => {
       <p class="muted">Sélectionnez les ventes dont l'argent est remis. Le montant total sera calculé depuis les paiements encaissés de chaque vente.</p>
       <div class="remittance-sales">${sales.map((sale) => `
         <label class="remittance-row"><input type="checkbox" name="saleId" value="${esc(sale.id)}" data-amount="${sale.remittanceAmount}">
-          <span><strong>${esc(sale.brand || "")} ${esc(sale.productName)}</strong> × ${sale.qty}<br><span class="muted small">Acheteur : ${esc(sale.buyerName || "Anonyme")} · ${fm(sale.unitPrice)} l'unité · ${fm(sale.remittanceAmount)} encaissé</span></span></label>`).join("")}</div>
+          <span><strong>${esc(sale.brand || "")} ${esc(sale.productName)}</strong> × ${sale.qty}</span>
+          <span class="muted small">${fmtDate(sale.date)} · Vendu par ${esc(sale.createdByName || "—")} · Acheteur : ${esc(sale.buyerName || "Anonyme")} · Prix : ${fm(sale.unitPrice)} / article · Reste à remettre : <strong class="pos">${fm(sale.remittanceAmount)}</strong></span></label>`).join("")}</div>
       <div class="summary-bar"><div><span class="muted">Montant de la remise</span><strong id="remittance-total" class="pos">${fm(0)}</strong></div></div>
       <label class="field"><span>Note <em>(facultatif)</em></span><input class="input" name="note"></label>
       <div class="row end gap"><button type="button" class="btn ghost" data-action="close-modal">Annuler</button>
@@ -83,14 +95,15 @@ submits.saveRemittance = async (form) => {
   const selected = [...form.querySelectorAll('input[name="saleId"]:checked')];
   if (!selected.length) return toast("Sélectionnez au moins une vente.", "error");
   const saleIds = selected.map((input) => input.value);
-  const amount = round2(selected.reduce((sum, input) => sum + num(input.dataset.amount), 0));
+  const saleItems = selected.map((input) => ({ saleId: input.value, amount: round2(num(input.dataset.amount)) }));
+  const amount = round2(saleItems.reduce((sum, item) => sum + item.amount, 0));
   const staleIds = saleIds.filter((id) => !paidSalesNotInRemittance().some((sale) => sale.id === id));
   if (staleIds.length) return toast("Une ou plusieurs ventes ont déjà été mises dans une autre remise.", "error");
   if (!(amount > 0)) return toast("Le montant sélectionné doit être supérieur à zéro.", "error");
   const me = state.me;
   try {
     await busy(form.querySelector("[type=submit]"), () => addDoc(collection(db, "remittances"), {
-      employeeUid: me.uid, employeeName: me.name, saleIds, amount, note: d.note || "",
+      employeeUid: me.uid, employeeName: me.name, saleIds, saleItems, amount, note: d.note || "",
       status: "pending", employeeConfirmedAt: serverTimestamp(), employeeConfirmedBy: me.uid,
       adminConfirmedAt: null, adminConfirmedBy: null, rejectedAt: null, rejectedBy: null,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
