@@ -1,7 +1,7 @@
 import { db, collection, doc, addDoc, updateDoc, serverTimestamp, Timestamp } from "../fb.js";
 import { state, isAdmin } from "../store.js";
 import { esc, fm, fmtDateTime, icon, chip, empty, openModal, closeModal, toast, busy, friendlyError, confirmBox } from "../ui.js";
-import { actions, getF, periodSelect } from "../core.js";
+import { actions, submits, getF, periodSelect } from "../core.js";
 import { num, round2, inPeriod, toDate } from "../logic.js";
 
 function paidSalesNotInRemittance() {
