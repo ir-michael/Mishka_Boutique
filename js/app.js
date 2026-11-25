@@ -21,8 +21,11 @@ import expenses from "./pages/expenses.js";
 import reports from "./pages/reports.js";
 import chat, { chatState } from "./pages/chat.js";
 import settings from "./pages/settings.js";
+import operations from "./pages/operations.js";
+import remittances from "./pages/remittances.js";
+import finances from "./pages/finances.js";
 
-const PAGES = [dashboard, sales, stock, orders, arrivalsPage, debts, movements, expenses, reports, chat, settings];
+const PAGES = [dashboard, sales, operations, stock, orders, arrivalsPage, debts, movements, expenses, remittances, finances, reports, chat, settings];
 const CURRENCIES = ["USD", "CDF", "EUR", "XAF", "XOF", "RWF", "UGX", "KES", "TZS", "ZAR", "GBP", "CAD", "MAD", "NGN", "GHS"];
 const root = document.getElementById("root");
 
@@ -188,7 +191,7 @@ const currentPage = () => pagesFor().find((p) => p.id === currentId()) || pagesF
 
 function showShell() {
   const nav = pagesFor();
-  const primary = ["dashboard", "sales", "stock", "chat"].filter((id) => nav.some((p) => p.id === id));
+  const primary = ["dashboard", "sales", "operations", "chat"].filter((id) => nav.some((p) => p.id === id));
   root.innerHTML = `
     <div class="app">
       <aside class="sidebar" id="sidebar">

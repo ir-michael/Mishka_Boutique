@@ -98,9 +98,11 @@ service cloud.firestore {
     match /movements/{id} {
       allow read: if isAdmin();
       allow create: if isAdmin()
-        || (isActive() && request.resource.data.type == 'out'
-            && request.resource.data.reason == 'sale'
-            && request.resource.data.by == request.auth.uid);
+        || (isActive() && request.resource.data.by == request.auth.uid
+            && ((request.resource.data.type == 'out'
+                  && request.resource.data.reason in ['sale', 'operation'])
+                || (request.resource.data.type == 'in'
+                  && request.resource.data.reason == 'operation_return')));
       allow update, delete: if isAdmin();
     }
 
@@ -122,6 +124,39 @@ service cloud.firestore {
       allow read: if isAdmin() || (isActive() && resource.data.createdBy == request.auth.uid);
       allow create: if isAdmin() || (isActive() && request.resource.data.createdBy == request.auth.uid);
       allow update, delete: if isAdmin();
+    }
+
+    // ---------- Opérations / commissionnaires ----------
+    match /operations/{id} {
+      allow read: if isAdmin()
+        || (isActive() && resource.data.createdBy == request.auth.uid);
+      allow create: if isActive()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.qty > 0;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Remises d'argent ----------
+    match /remittances/{id} {
+      allow read: if isAdmin()
+        || (isActive() && resource.data.employeeUid == request.auth.uid);
+      allow create: if isActive()
+        && request.resource.data.employeeUid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.employeeConfirmedBy == request.auth.uid
+        && request.resource.data.amount > 0;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Capital et dépenses personnelles : ADMIN uniquement ----------
+    match /capitalEntries/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /personalExpenses/{id} {
+      allow read, write: if isAdmin();
     }
 
     // ---------- Messagerie ----------

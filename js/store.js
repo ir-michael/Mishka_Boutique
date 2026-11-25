@@ -13,6 +13,7 @@ function fresh() {
     me: null,               // { uid, name, email, role, active }
     shop: { ...DEFAULT_SHOP },
     products: [], costs: {}, sales: [], orders: [], notices: [], movements: [], expenses: [],
+    operations: [], remittances: [], capitalEntries: [], personalExpenses: [],
     users: [], messages: [],
     ready: {},
     chatLimit: 60,
@@ -78,9 +79,15 @@ export function startStore(me) {
     listen("orders", query(collection(db, "orders"), orderBy("createdAt", "desc")));
     listen("movements", query(collection(db, "movements"), orderBy("date", "desc")));
     listen("expenses", query(collection(db, "expenses"), orderBy("date", "desc")));
+    listen("operations", query(collection(db, "operations"), orderBy("createdAt", "desc")));
+    listen("remittances", query(collection(db, "remittances"), orderBy("createdAt", "desc")));
+    listen("capitalEntries", query(collection(db, "capitalEntries"), orderBy("date", "desc")));
+    listen("personalExpenses", query(collection(db, "personalExpenses"), orderBy("date", "desc")));
   } else {
     listen("expenses", query(collection(db, "expenses"), where("createdBy", "==", me.uid)),
       (s) => list(s).sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0)));
+    listen("operations", query(collection(db, "operations"), where("createdBy", "==", me.uid), orderBy("createdAt", "desc")));
+    listen("remittances", query(collection(db, "remittances"), where("employeeUid", "==", me.uid), orderBy("createdAt", "desc")));
   }
   firstMsgLoad = true;
   listenMessages();

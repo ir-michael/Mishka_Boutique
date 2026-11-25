@@ -139,6 +139,7 @@ actions.backup = () => {
   const data = {
     exportedAt: new Date().toISOString(), shop: state.shop, products: state.products, costs: state.costs, sales: state.sales,
     orders: state.orders, movements: state.movements, expenses: state.expenses,
+    operations: state.operations, remittances: state.remittances, capitalEntries: state.capitalEntries, personalExpenses: state.personalExpenses,
   };
   const blob = new Blob([JSON.stringify(data, (k, v) => (v && typeof v.toDate === "function" ? v.toDate().toISOString() : v), 2)], { type: "application/json" });
   const a = document.createElement("a");
