@@ -7,7 +7,7 @@ import {
 import { state, startStore, stopStore, onData, onNewMessage, DEFAULT_SHOP, unreadCount } from "./store.js";
 import { actions, submits, inputs, setRender, setF, getF } from "./core.js";
 import {
-  esc, icon, toast, closeModal, modalOpen, formData, busy, friendlyError, confirmBox,
+  esc, icon, toast, openModal, closeModal, modalOpen, formData, busy, friendlyError, confirmBox,
 } from "./ui.js";
 import { CATEGORIES } from "./config.js";
 
