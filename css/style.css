@@ -397,29 +397,63 @@ a.alert:hover { filter: brightness(.97); }
 @media (max-width: 420px) {
   .kpi-grid { grid-template-columns: 1fr; }
 }
-.remittance-review { display: grid; gap: 8px; }
-.remittance-review-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 10px 0; }
-.remittance-review-row:last-child { border-bottom: 0; }
-.remittance-review-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
-.remittance-review-summary > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.remittance-list { display: grid; gap: 12px; }
+.remittance-card { padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.remittance-card-head, .remittance-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.remittance-card-head > div { display: grid; gap: 3px; }
+.remittance-card-head time { color: var(--muted); font-size: .82rem; }
+.remittance-card-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.remittance-card-summary > div { display: grid; gap: 5px; min-width: 0; padding: 11px 12px; background: var(--bg); border-radius: 6px; }
+.remittance-card-summary strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.remittance-card-foot { padding-top: 12px; border-top: 1px solid var(--line); }
 .remittance-counts { display: flex; flex-wrap: wrap; gap: 8px; font-size: .82rem; }
-.notification-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.remittance-review { display: grid; gap: 0; margin: 12px 0; border-top: 1px solid var(--line); }
+.remittance-review-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 220px); align-items: center; gap: 20px; border-bottom: 1px solid var(--line); padding: 14px 0; }
+.remittance-sale-info { min-width: 0; }
+.remittance-sale-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.remittance-sale-meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 6px; color: var(--muted); font-size: .82rem; }
+.remittance-decision { width: 100%; }
+.remittance-review-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.remittance-review-summary > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.remittance-review-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 22px; }
+.remittance-review-heading h4 { margin: 0; }
+.remittance-note { padding: 11px 13px; margin-top: 10px; border-left: 3px solid var(--primary); background: var(--bg); }
+.remittance-note p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.remittance-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.remittance-detail-head h4 { margin: 6px 0 0; }
+.remittance-detail-head time { color: var(--muted); font-size: .82rem; }
+.remittance-modal-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.notification-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.notification-filters { display: flex; gap: 4px; padding: 3px; background: var(--bg); border-radius: 7px; }
+.notification-filter { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: .86rem; }
+.notification-filter.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.notification-filter span { color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }
 .notification-list { display: grid; gap: 8px; max-height: min(65dvh, 620px); overflow-y: auto; }
-.notification-item { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--surface); }
+.notification-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .notification-item.unread { background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 25%, var(--line)); }
-.notification-dot { width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: transparent; flex: none; }
-.notification-item.unread .notification-dot { background: var(--primary); }
-.notification-content { flex: 1; min-width: 0; }
+.notification-symbol, .notification-empty-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 7px; background: var(--bg); color: var(--muted); }
+.notification-item.unread .notification-symbol { background: var(--surface); color: var(--primary); }
+.notification-content { min-width: 0; }
 .notification-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .notification-heading time { color: var(--muted); font-size: .76rem; white-space: nowrap; }
-.notification-content p { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
-@media (max-width: 620px) {
-  .remittance-review-row { align-items: flex-start; flex-direction: column; }
-  .remittance-review-summary { grid-template-columns: 1fr; }
-  .notification-item { flex-wrap: wrap; }
-  .notification-content { flex-basis: calc(100% - 24px); }
+.notification-content p { margin: 5px 0 0; color: var(--muted); overflow-wrap: anywhere; line-height: 1.45; }
+.notification-empty { display: grid; justify-items: center; gap: 8px; padding: 42px 18px; text-align: center; }
+.notification-empty-icon { width: 44px; height: 44px; color: var(--muted); }
+.notification-empty p { margin: 0; color: var(--muted); }
+@media (max-width: 720px) {
+  .remittance-card { padding: 14px; }
+  .remittance-card-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .remittance-card-foot { align-items: flex-start; flex-direction: column; }
+  .remittance-review-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .remittance-review-row { grid-template-columns: 1fr; gap: 10px; }
+  .remittance-modal-footer { align-items: stretch; flex-direction: column; }
+  .notification-toolbar { align-items: stretch; flex-direction: column; }
+  .notification-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .notification-filter { justify-content: center; padding: 0 6px; }
+  .notification-item { grid-template-columns: 32px minmax(0, 1fr); gap: 9px; padding: 12px; }
+  .notification-symbol { width: 32px; height: 32px; }
   .notification-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
-  .notification-item > .btn, .notification-item > .chip { margin-left: 21px; }
+  .notification-item > .btn, .notification-item > .chip { grid-column: 2; justify-self: start; }
 }
 @media print { .sidebar, .topbar, .bottom-nav, #toasts { display: none !important; } .app { display: block; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

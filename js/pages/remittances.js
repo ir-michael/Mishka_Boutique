@@ -48,10 +48,17 @@ function remittanceItems(remittance) {
 
 function remittanceDecisionCounts(remittance) {
   const items = remittanceItems(remittance);
+  const confirmedItems = items.filter((item) => item.status === "confirmed");
+  const rejectedItems = items.filter((item) => item.status === "rejected");
+  const pendingItems = items.filter((item) => !item.status || item.status === "pending");
   return {
-    confirmed: items.filter((item) => item.status === "confirmed").length,
-    rejected: items.filter((item) => item.status === "rejected").length,
-    pending: items.filter((item) => !item.status || item.status === "pending").length,
+    proposedAmount: round2(items.reduce((sum, item) => sum + num(item.amount), 0)) || num(remittance.proposedAmount ?? remittance.amount),
+    confirmed: confirmedItems.length,
+    confirmedAmount: round2(confirmedItems.reduce((sum, item) => sum + num(item.amount), 0)),
+    rejected: rejectedItems.length,
+    rejectedAmount: round2(rejectedItems.reduce((sum, item) => sum + num(item.amount), 0)),
+    pending: pendingItems.length,
+    pendingAmount: round2(pendingItems.reduce((sum, item) => sum + num(item.amount), 0)),
   };
 }
 
@@ -60,10 +67,14 @@ function canReviewRemittance(remittance) {
 }
 
 function statusFor(remittance) {
-  if (remittance.status === "confirmed" || (!remittance.status && remittance.employeeConfirmedAt && remittance.adminConfirmedAt)) return chip("Confirmée", "green");
-  if (remittance.status === "partially_confirmed") return chip("Traitée partiellement", "amber");
-  if (remittance.status === "partial") return chip("Partiellement vérifiée", "amber");
-  if (remittance.status === "rejected") return chip("Refusée", "red");
+  const counts = remittanceDecisionCounts(remittance);
+  const hasLineDecisions = remittance.saleItems?.some((item) => item.status === "confirmed" || item.status === "rejected");
+  if (!hasLineDecisions && remittance.status === "confirmed") return chip("Confirmée", "green");
+  if (!hasLineDecisions && remittance.status === "rejected") return chip("Refusée", "red");
+  if (!counts.pending && counts.rejected && counts.confirmed) return chip("Traitée partiellement", "amber");
+  if (!counts.pending && counts.rejected && !counts.confirmed) return chip("Refusée", "red");
+  if (!counts.pending && !counts.rejected) return chip("Confirmée", "green");
+  if (counts.confirmed || counts.rejected) return chip("Partiellement vérifiée", "amber");
   return chip("En attente de confirmation", "amber");
 }
 
@@ -75,17 +86,22 @@ function render() {
     <div class="page-head"><div><h2>Remises d'argent</h2><p class="muted">Ventes remises au propriétaire</p></div>
       ${employee ? `<button class="btn primary" data-action="new-remittance">${icon("plus")} Nouvelle remise</button>` : ""}</div>
     <div class="toolbar">${periodSelect("remittances.period", "month")}</div>
-    <section class="card flush">${list.length ? `<table class="table responsive remittance-table"><thead><tr><th>Date</th><th>Employé</th><th class="num">Montant proposé</th><th>Décisions sur les ventes</th><th>Employé</th><th>Administrateur</th><th>Statut</th><th></th></tr></thead><tbody>
-      ${list.map((item) => `<tr>
-        <td data-label="Date">${fmtDateTime(item.createdAt)}</td>
-        <td data-label="Employé"><strong>${esc(item.employeeName)}</strong></td>
-        <td data-label="Montant" class="num"><strong>${fm(item.amount)}</strong></td>
-        <td data-label="Décisions">${(() => { const counts = remittanceDecisionCounts(item); return `<span class="remittance-counts"><span class="pos">${counts.confirmed} validée(s)</span><span class="neg">${counts.rejected} refusée(s)</span><span class="muted">${counts.pending} en attente</span></span>`; })()}</td>
-        <td data-label="Employé">${item.employeeConfirmedAt ? chip("Confirmée", "green") : chip("Non", "amber")}</td>
-        <td data-label="Administrateur">${item.adminConfirmedAt ? chip("Confirmée", "green") : chip("En attente", "amber")}</td>
-        <td data-label="Statut">${statusFor(item)}</td>
-        <td class="actions">${canReviewRemittance(item) ? `<button class="btn sm primary" data-action="review-remittance" data-id="${esc(item.id)}">Vérifier les ventes</button>` : ""}</td>
-      </tr>`).join("")}</tbody></table>` : empty("Aucune remise sur cette période.", "wallet")}</section>`;
+    <section class="remittance-list">${list.length ? list.map((item) => {
+      const counts = remittanceDecisionCounts(item);
+      return `<article class="remittance-card">
+        <div class="remittance-card-head"><div><strong>${esc(item.employeeName)}</strong><time>${fmtDateTime(item.createdAt)}</time></div>${statusFor(item)}</div>
+        <div class="remittance-card-summary">
+          <div><span class="muted">Proposé</span><strong>${fm(counts.proposedAmount || item.amount)}</strong></div>
+          <div><span class="muted">Validé</span><strong class="pos">${fm(counts.confirmedAmount)}</strong></div>
+          <div><span class="muted">Refusé</span><strong class="neg">${fm(counts.rejectedAmount)}</strong></div>
+          <div><span class="muted">À vérifier</span><strong>${fm(counts.pendingAmount)}</strong></div>
+        </div>
+        <div class="remittance-card-foot"><span class="muted">${counts.confirmed} validée(s) · ${counts.rejected} refusée(s) · ${counts.pending} en attente</span>
+          <div class="row gap wrap"><button class="btn sm ghost" data-action="view-remittance" data-id="${esc(item.id)}">Détails</button>
+            ${canReviewRemittance(item) ? `<button class="btn sm primary" data-action="review-remittance" data-id="${esc(item.id)}">Continuer la vérification (${counts.pending})</button>` : ""}</div>
+        </div>
+      </article>`;
+    }).join("") : empty("Aucune remise sur cette période.", "wallet")}</section>`;
 }
 
 actions["new-remittance"] = () => {
@@ -131,7 +147,7 @@ submits.saveRemittance = async (form) => {
   const me = state.me;
   try {
     await busy(form.querySelector("[type=submit]"), () => addDoc(collection(db, "remittances"), {
-      employeeUid: me.uid, employeeName: me.name, saleIds, saleItems, amount, note: d.note || "",
+      employeeUid: me.uid, employeeName: me.name, saleIds, saleItems, amount, proposedAmount: amount, note: d.note || "",
       status: "pending", employeeConfirmedAt: serverTimestamp(), employeeConfirmedBy: me.uid,
       adminConfirmedAt: null, adminConfirmedBy: null, rejectedAt: null, rejectedBy: null,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
@@ -150,32 +166,53 @@ submits.saveRemittance = async (form) => {
   } catch (error) { toast(friendlyError(error), "error", 5000); }
 };
 
-actions["review-remittance"] = (el) => {
-  const item = state.remittances.find((row) => row.id === el.dataset.id);
-  if (!item || !canReviewRemittance(item)) return;
+function openRemittanceDetails(item, editable) {
+  if (!item) return;
+  const canEdit = editable && canReviewRemittance(item);
   const items = remittanceItems(item);
+  const counts = remittanceDecisionCounts(item);
   const rows = items.map((saleItem) => {
     const sale = state.sales.find((row) => row.id === saleItem.saleId);
     const status = saleItem.status || "pending";
-    const decisionControl = status === "confirmed" || status === "rejected"
+    const decisionControl = status !== "pending" || !canEdit
       ? saleItemStatusLabel(status)
-      : `<select class="select" name="decision_${esc(saleItem.saleId)}"><option value="pending" selected>En attente</option><option value="confirmed">Valider</option><option value="rejected">Refuser</option></select>`;
+      : `<select class="select remittance-decision" name="decision_${esc(saleItem.saleId)}"><option value="pending" selected>À décider</option><option value="confirmed">Valider cette vente</option><option value="rejected">Refuser cette vente</option></select>`;
     return `<div class="remittance-review-row">
-      <div class="grow"><strong>${esc(sale?.brand || "")} ${esc(sale?.productName || "Vente introuvable")}</strong> × ${sale?.qty || 0}
-        <div class="muted small">Acheteur : ${esc(sale?.buyerName || "Anonyme")} · ${fm(sale?.unitPrice)} / article · Remise : ${fm(saleItem.amount)}</div></div>
-      ${decisionControl}
+      <div class="remittance-sale-info"><div class="remittance-sale-title"><strong>${esc(sale?.brand || "")} ${esc(sale?.productName || "Vente introuvable")}</strong><span>× ${sale?.qty || 0}</span></div>
+        <div class="remittance-sale-meta"><span>${fmtDateTime(sale?.date)}</span><span>Acheteur : ${esc(sale?.buyerName || "Anonyme")}</span><span>${fm(sale?.unitPrice)} / article</span><span>Remise : <strong>${fm(saleItem.amount)}</strong></span></div></div>
+      <div class="remittance-decision">${decisionControl}</div>
     </div>`;
   }).join("");
+  const content = `
+      <div class="remittance-detail-head"><div><span class="eyebrow">Remise de ${esc(item.employeeName)}</span><h4>${statusFor(item)}</h4></div><time>${fmtDateTime(item.createdAt)}</time></div>
+      <div class="remittance-review-summary"><div><span class="muted">Montant proposé</span><strong>${fm(counts.proposedAmount)}</strong></div><div><span class="muted">Validé</span><strong class="pos">${fm(counts.confirmedAmount)}</strong></div><div><span class="muted">Refusé</span><strong class="neg">${fm(counts.rejectedAmount)}</strong></div><div><span class="muted">À vérifier</span><strong>${fm(counts.pendingAmount)}</strong></div></div>
+      <div class="remittance-review-heading"><h4>Ventes incluses</h4><span class="muted">${items.length} ligne(s)</span></div>
+      <div class="remittance-review">${rows}</div>
+      ${item.note ? `<div class="remittance-note"><span class="muted">Note de l’employé</span><p>${esc(item.note)}</p></div>` : ""}
+      ${item.adminNote ? `<div class="remittance-note"><span class="muted">Note de l’administrateur</span><p>${esc(item.adminNote)}</p></div>` : ""}`;
+  if (!canEdit) {
+    openModal("Détails de la remise", content, { wide: true });
+    return;
+  }
   openModal("Vérifier la remise", `
     <form data-submit="reviewRemittance" class="form">
       <input type="hidden" name="id" value="${esc(item.id)}">
-      <div class="remittance-review-summary"><div><span class="muted">Employé</span><strong>${esc(item.employeeName)}</strong></div><div><span class="muted">Montant proposé</span><strong>${fm(item.amount)}</strong></div><div><span class="muted">À vérifier</span><strong>${remittanceDecisionCounts(item).pending} vente(s)</strong></div></div>
-      <p class="muted">Décidez ligne par ligne. Les ventes validées sont confirmées, les refusées sont retirées, et seules celles laissées « En attente » resteront à vérifier.</p>
-      <div class="remittance-review">${rows}</div>
+      ${content}
       <label class="field"><span>Note administrateur <em>(facultatif)</em></span><input class="input" name="adminNote"></label>
-      <div class="row end gap"><button type="button" class="btn ghost" data-action="close-modal">Annuler</button>
-        <button class="btn primary" type="submit">Enregistrer la vérification</button></div>
+      <div class="remittance-modal-footer"><span class="muted">Les décisions déjà enregistrées ne peuvent pas être modifiées.</span><div class="row end gap"><button type="button" class="btn ghost" data-action="close-modal">Fermer</button>
+        <button class="btn primary" type="submit">Enregistrer les décisions</button></div></div>
     </form>`, { wide: true });
+}
+
+actions["view-remittance"] = (el) => {
+  const item = state.remittances.find((row) => row.id === el.dataset.id);
+  openRemittanceDetails(item, false);
+};
+
+actions["review-remittance"] = (el) => {
+  const item = state.remittances.find((row) => row.id === el.dataset.id);
+  if (!item || !canReviewRemittance(item)) return;
+  openRemittanceDetails(item, true);
 };
 
 submits.reviewRemittance = async (form) => {
@@ -189,7 +226,7 @@ submits.reviewRemittance = async (form) => {
   try {
     await busy(form.querySelector("[type=submit]"), () => updateDoc(doc(db, "remittances", item.id), {
       saleItems, saleIds: saleItems.filter((saleItem) => saleItem.status !== "rejected").map((saleItem) => saleItem.saleId),
-      amount: review.amount,
+      amount: review.amount, proposedAmount: review.proposedAmount,
       approvedAmount, status, adminNote: d.adminNote || "", adminConfirmedAt: pendingCount === 0 ? serverTimestamp() : null,
       adminConfirmedBy: pendingCount === 0 ? state.me.uid : null, updatedAt: serverTimestamp(),
     }));

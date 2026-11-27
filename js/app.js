@@ -35,6 +35,7 @@ let settingUp = false;
 let missingTimer = null;
 let started = null;       // uid pour lequel le store est démarré
 let notificationsInitialized = false;
+let notificationsFilter = "all";
 const knownNotificationIds = new Set();
 
 // ============================================================
@@ -394,25 +395,38 @@ actions["enable-notif"] = async () => {
 };
 
 function openNotificationsModal() {
-  const items = [...state.notifications].sort((a, b) => {
+  const allItems = [...state.notifications].sort((a, b) => {
     const time = (item) => item.createdAt?.toMillis?.() ?? item.createdAt?.seconds * 1000 ?? 0;
     return time(b) - time(a);
   });
-  const unread = items.filter((item) => !item.readBy?.includes(state.me.uid)).length;
-  const body = items.length ? `
-    <div class="notification-toolbar"><span class="muted">${unread} non lue(s) · ${items.length} notification(s)</span>
-      ${unread ? `<button class="btn sm ghost" data-action="read-all-notifications">Tout marquer comme lu</button>` : ""}</div>
-    <div class="notification-list">${items.map((item) => {
+  const allUnread = allItems.filter((item) => !item.readBy?.includes(state.me.uid)).length;
+  const items = allItems.filter((item) => notificationsFilter === "all"
+    || (notificationsFilter === "unread" && !item.readBy?.includes(state.me.uid))
+    || (notificationsFilter === "read" && item.readBy?.includes(state.me.uid)));
+  const body = `
+    <div class="notification-toolbar">
+      <div class="notification-filters" role="tablist" aria-label="Filtrer les notifications">
+        ${[["all", "Toutes", allItems.length], ["unread", "Non lues", allUnread], ["read", "Lues", allItems.length - allUnread]].map(([key, label, count]) =>
+          `<button class="notification-filter ${notificationsFilter === key ? "active" : ""}" role="tab" aria-selected="${notificationsFilter === key}" data-action="filter-notifications" data-filter="${key}">${label}<span>${count}</span></button>`).join("")}
+      </div>
+      ${allUnread ? `<button class="btn sm ghost" data-action="read-all-notifications">Tout marquer comme lu</button>` : ""}
+    </div>
+    ${items.length ? `<div class="notification-list">${items.map((item) => {
       const isUnread = !item.readBy?.includes(state.me.uid);
       return `<article class="notification-item ${isUnread ? "unread" : "read"}">
-        <span class="notification-dot" aria-hidden="true"></span>
+        <span class="notification-symbol">${icon("bell", 18)}</span>
         <div class="notification-content"><div class="notification-heading"><strong>${esc(item.title || "Notification")}</strong><time>${esc(fmtDateTime(item.createdAt))}</time></div>
           <p>${esc(item.message || "")}</p></div>
         ${isUnread ? `<button class="btn sm ghost" data-action="read-notification" data-id="${esc(item.id)}">Marquer comme lu</button>` : chip("Lue", "gray")}
       </article>`;
-    }).join("")}</div>` : `<div class="empty"><p>Aucune notification.</p></div>`;
+    }).join("")}</div>` : `<div class="notification-empty"><span class="notification-empty-icon">${icon("bell", 22)}</span><strong>${notificationsFilter === "unread" ? "Tout est à jour" : notificationsFilter === "read" ? "Aucune notification lue" : "Aucune notification"}</strong><p>${notificationsFilter === "unread" ? "Vous n'avez aucune notification non lue." : "Les nouvelles activités apparaîtront ici."}</p></div>`}`;
   openModal("Notifications", body, { wide: true });
 }
+
+actions["filter-notifications"] = (el) => {
+  notificationsFilter = el.dataset.filter || "all";
+  openNotificationsModal();
+};
 
 actions["read-notification"] = async (el) => {
   const item = state.notifications.find((row) => row.id === el.dataset.id);
