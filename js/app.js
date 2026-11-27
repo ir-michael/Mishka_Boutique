@@ -7,7 +7,7 @@ import {
 import { state, startStore, stopStore, onData, onNewMessage, DEFAULT_SHOP, unreadCount } from "./store.js";
 import { actions, submits, inputs, setRender, setF, getF } from "./core.js";
 import {
-  esc, icon, toast, openModal, closeModal, modalOpen, formData, busy, friendlyError, confirmBox,
+  esc, icon, toast, openModal, closeModal, modalOpen, formData, busy, friendlyError, confirmBox, fmtDateTime, chip,
 } from "./ui.js";
 import { CATEGORIES } from "./config.js";
 
@@ -236,6 +236,7 @@ function paintChrome() {
   document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === p.id));
   const unread = unreadCount();
   const notificationUnread = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid)).length;
+  if (!state.ready.notifications) return;
   if (!notificationsInitialized) {
     state.notifications.forEach((item) => knownNotificationIds.add(item.id));
     notificationsInitialized = true;
@@ -388,18 +389,48 @@ function syncNotifButton() {
 }
 actions["enable-notif"] = async () => {
   if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission();
-  const items = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid));
-  const body = items.length ? `<div class="list">${items.map((item) => `<button class="list-row notification-row" data-action="read-notification" data-id="${esc(item.id)}"><div class="grow"><strong>${esc(item.title)}</strong><div class="muted small">${esc(item.message)}</div></div></button>`).join("")}</div>` : `<div class="empty"><p>Aucune nouvelle notification.</p></div>`;
-  openModal("Notifications", body);
+  openNotificationsModal();
   syncNotifButton();
 };
+
+function openNotificationsModal() {
+  const items = [...state.notifications].sort((a, b) => {
+    const time = (item) => item.createdAt?.toMillis?.() ?? item.createdAt?.seconds * 1000 ?? 0;
+    return time(b) - time(a);
+  });
+  const unread = items.filter((item) => !item.readBy?.includes(state.me.uid)).length;
+  const body = items.length ? `
+    <div class="notification-toolbar"><span class="muted">${unread} non lue(s) · ${items.length} notification(s)</span>
+      ${unread ? `<button class="btn sm ghost" data-action="read-all-notifications">Tout marquer comme lu</button>` : ""}</div>
+    <div class="notification-list">${items.map((item) => {
+      const isUnread = !item.readBy?.includes(state.me.uid);
+      return `<article class="notification-item ${isUnread ? "unread" : "read"}">
+        <span class="notification-dot" aria-hidden="true"></span>
+        <div class="notification-content"><div class="notification-heading"><strong>${esc(item.title || "Notification")}</strong><time>${esc(fmtDateTime(item.createdAt))}</time></div>
+          <p>${esc(item.message || "")}</p></div>
+        ${isUnread ? `<button class="btn sm ghost" data-action="read-notification" data-id="${esc(item.id)}">Marquer comme lu</button>` : chip("Lue", "gray")}
+      </article>`;
+    }).join("")}</div>` : `<div class="empty"><p>Aucune notification.</p></div>`;
+  openModal("Notifications", body, { wide: true });
+}
 
 actions["read-notification"] = async (el) => {
   const item = state.notifications.find((row) => row.id === el.dataset.id);
   if (!item) return;
   try {
     await updateDoc(doc(db, "notifications", item.id), { readBy: [...new Set([...(item.readBy || []), state.me.uid])], readAt: serverTimestamp() });
-    closeModal();
+    openNotificationsModal();
+  } catch (error) { toast(friendlyError(error), "error"); }
+};
+
+actions["read-all-notifications"] = async () => {
+  const unread = state.notifications.filter((item) => !item.readBy?.includes(state.me.uid));
+  try {
+    await Promise.all(unread.map((item) => updateDoc(doc(db, "notifications", item.id), {
+      readBy: [...new Set([...(item.readBy || []), state.me.uid])], readAt: serverTimestamp(),
+    })));
+    openNotificationsModal();
+    toast("Toutes les notifications sont marquées comme lues.", "success");
   } catch (error) { toast(friendlyError(error), "error"); }
 };
 

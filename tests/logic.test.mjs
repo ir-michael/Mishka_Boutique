@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   orderTotals, allocateCosts, suggestPrice, paymentStatus, remaining, isOverdue, daysLate,
-  saleProfit, periodStart, inPeriod, stockValues, num, round2,
+  saleProfit, periodStart, inPeriod, stockValues, num, round2, reviewRemittanceItems,
 } from "../js/logic.js";
 
 const order = {
@@ -57,6 +57,25 @@ test("statut de paiement : soldé / partiel / impayé", () => {
   assert.equal(remaining(100, 40), 60);
   assert.equal(remaining(100, 140), 0);
   assert.equal(remaining(99.99, 33.33), 66.66);
+});
+
+test("revue de remise conserve les décisions précédentes et distingue le traité partiellement", () => {
+  const initial = [
+    { saleId: "a", amount: 55 },
+    { saleId: "b", amount: 140 },
+    { saleId: "c", amount: 125 },
+  ];
+  const firstReview = reviewRemittanceItems(initial, { a: "confirmed", b: "rejected" });
+  assert.equal(firstReview.status, "partial");
+  assert.equal(firstReview.approvedAmount, 55);
+  assert.equal(firstReview.amount, 180);
+  assert.deepEqual(firstReview.saleItems.map((item) => item.status), ["confirmed", "rejected", "pending"]);
+
+  const secondReview = reviewRemittanceItems(firstReview.saleItems, { c: "rejected" });
+  assert.equal(secondReview.status, "partially_confirmed");
+  assert.equal(secondReview.approvedAmount, 55);
+  assert.equal(secondReview.amount, 55);
+  assert.deepEqual(secondReview.saleItems.map((item) => item.status), ["confirmed", "rejected", "rejected"]);
 });
 
 test("créance en retard : échéance dépassée seulement si un solde reste dû", () => {

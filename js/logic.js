@@ -49,6 +49,32 @@ export function paymentStatus(total, paid) {
 
 export const remaining = (total, paid) => Math.max(0, round2(num(total) - num(paid)));
 
+export function reviewRemittanceItems(items, decisions = {}) {
+  const saleItems = items.map((item) => ({
+    ...item,
+    status: decisions[item.saleId] ?? item.status ?? "pending",
+  }));
+  const confirmed = saleItems.filter((item) => item.status === "confirmed");
+  const rejected = saleItems.filter((item) => item.status === "rejected");
+  const pending = saleItems.filter((item) => item.status === "pending");
+  const approvedAmount = sum(confirmed, (item) => item.amount);
+  const pendingAmount = sum(pending, (item) => item.amount);
+  const status = pending.length
+    ? (confirmed.length || rejected.length ? "partial" : "pending")
+    : rejected.length === 0 ? "confirmed"
+      : confirmed.length > 0 ? "partially_confirmed" : "rejected";
+  return {
+    saleItems,
+    approvedAmount,
+    pendingAmount,
+    amount: round2(approvedAmount + pendingAmount),
+    confirmedCount: confirmed.length,
+    rejectedCount: rejected.length,
+    pendingCount: pending.length,
+    status,
+  };
+}
+
 /** Une vente est en retard si un solde est dû et que l'échéance est passée. */
 export function isOverdue(sale, now = new Date()) {
   if (!sale || sale.status === "cancelled" || num(sale.remaining) <= 0) return false;

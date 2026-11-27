@@ -400,8 +400,26 @@ a.alert:hover { filter: brightness(.97); }
 .remittance-review { display: grid; gap: 8px; }
 .remittance-review-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 10px 0; }
 .remittance-review-row:last-child { border-bottom: 0; }
+.remittance-review-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.remittance-review-summary > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.remittance-counts { display: flex; flex-wrap: wrap; gap: 8px; font-size: .82rem; }
+.notification-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.notification-list { display: grid; gap: 8px; max-height: min(65dvh, 620px); overflow-y: auto; }
+.notification-item { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--surface); }
+.notification-item.unread { background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 25%, var(--line)); }
+.notification-dot { width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: transparent; flex: none; }
+.notification-item.unread .notification-dot { background: var(--primary); }
+.notification-content { flex: 1; min-width: 0; }
+.notification-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.notification-heading time { color: var(--muted); font-size: .76rem; white-space: nowrap; }
+.notification-content p { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 620px) {
   .remittance-review-row { align-items: flex-start; flex-direction: column; }
+  .remittance-review-summary { grid-template-columns: 1fr; }
+  .notification-item { flex-wrap: wrap; }
+  .notification-content { flex-basis: calc(100% - 24px); }
+  .notification-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .notification-item > .btn, .notification-item > .chip { margin-left: 21px; }
 }
 @media print { .sidebar, .topbar, .bottom-nav, #toasts { display: none !important; } .app { display: block; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
